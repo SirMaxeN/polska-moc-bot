@@ -1,0 +1,50 @@
+# Dependencies and generated application output
+node_modules/
+dist/
+coverage/
+__pycache__/
+*.py[cod]
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+.envrc
+*.pem
+*.key
+*.p12
+*.pfx
+discord-bot-token
+WinSCP.ini
+winscp.ini
+
+# Runtime state, databases, backups and deployment packages
+deployment/
+local-artifacts/
+data/
+backups/
+config/release.json
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.log
+*.zip
+*.tar
+*.gz
+*.bak
+*.tmp
+*.temp
+*~
+
+# Private setup captures and generated tutorial media (retain locally)
+/docs/setup/
+/docs/demo/*
+!/docs/demo/*.md
+!/docs/demo/*.py
+
+# Editor and OS metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

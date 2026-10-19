@@ -1,0 +1,9 @@
+{
+  "applicationId": "1559328501553954925",
+  "emojis": {
+    "egg": { "id": "1559351702149144637", "name": "egg" },
+    "hammer": { "id": "1559351705118834689", "name": "hammer" },
+    "mountKey": { "id": "1559351707010334813", "name": "mountkey" },
+    "skillTicket": { "id": "1559351708080021526", "name": "skillticket" }
+  }
+}
