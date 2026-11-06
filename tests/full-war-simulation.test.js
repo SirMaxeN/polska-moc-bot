@@ -56,11 +56,14 @@ test('invalid pair counts, duplicates, fake samples and mismatched/stale profile
 test('a fully unknown matrix cannot be saved as a combat probability report',()=>{
  const b=fixture();b.profiles.ours.fill(null);b.simulation.matrix=b.simulation.matrix.map(x=>({ally:x.ally,enemy:x.enemy,error:'Brak profilu'}));assert.throws(()=>plan(b),/Brak choć jednej/);
 });
-test('full 50x50 report stays in one message, keeps every matchup in its attachment and respects embed limits',()=>{
- const b=fixture(50);b.plan=plan(b);const row={war_day:'TEST',payload:JSON.stringify(b)},first=WarReport.render(row,'u',0,true);
- const count=Number(first.embeds.at(-1).footer.text.match(/\/(\d+)/)[1]);
- for(let i=0;i<count;i++){const view=WarReport.render(row,'u',i,true);assert.ok(view.embeds.reduce((n,e)=>n+WarReport.length(e),0)<=6000);assert.ok(view.embeds.every(e=>(e.description?.length??0)<=4096));assert.equal(view.additionalMessages,undefined);}
- const text=first.files[0].data.toString('utf8');assert.match(text,/2500\/2500/);assert.match(text,/1024 prób/);assert.match(text,/95%/);assert.match(text,/Nasz49 → Rywal49/);assert.doesNotMatch(text,/Metoda: moc ×/);
+test('full 50x50 report gives everyone a distinct rival in one short message within embed limits',()=>{
+ const b=fixture(50);b.plan=plan(b);const row={war_day:'TEST',payload:JSON.stringify(b)},view=WarReport.render(row,'u',0,true);
+ assert.ok(view.embeds.reduce((n,e)=>n+WarReport.length(e),0)<=6000);assert.ok(view.embeds.every(e=>(e.description?.length??0)<=4096));
+ assert.equal(view.files,undefined);assert.equal(view.components.length,0);
+ const text=view.embeds.map(e=>e.description).join('\n');
+ const targets=[...text.matchAll(/→ \*\*(Rywal\d+)\*\*/g)].map(m=>m[1]);
+ assert.equal(targets.length,50);assert.equal(new Set(targets).size,50);
+ assert.match(text,/\*\*Nasz49\*\* → \*\*Rywal\d+\*\* \(\d+%\)/);
 });
 test('authenticated large full-profile upload survives HTTP, remains repeatable TEST and does not lock real Sunday',async t=>{
  const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());const mobile=new MobileSync(db,new ScoringService(),{clock:()=>now});

@@ -43,5 +43,17 @@ test('saved ranking renders a private report with attachment and never mentions'
  const view=rankings.report('g');
  assert.deepEqual(view.allowed_mentions,{parse:[]});
  assert.match(view.embeds[0].description,/1\. Gracz0/);
- assert.match(view.files[0].data.toString('utf8'),/Gracz2/);
+ assert.equal(view.files,undefined);assert.match(view.embeds.map(e=>e.description).join('\n'),/Gracz2/);
+});
+
+test('ranking report lists all fifty players across embeds within Discord limits',t=>{
+ const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());
+ const rankings=new ClanRankings(db,()=>now);
+ const b=body(50);b.members.forEach((m,i)=>m.name=`DlugiNickGracza${String(i).padStart(2,'0')}xxxxxxxxxxxxxxxxxxxx`);b.profiles=b.members.map(profile);
+ rankings.save({guild_id:'g'},b);
+ const view=rankings.report('g');const text=view.embeds.map(e=>e.description).join('\n');
+ for(let i=0;i<50;i++)assert.match(text,new RegExp(`DlugiNickGracza${String(i).padStart(2,'0')}`));
+ assert.match(text,/^50\. /m);
+ assert.ok(view.embeds.every(e=>e.description.length<=4096));
+ assert.ok(view.embeds.reduce((n,e)=>n+e.description.length+(e.title?.length??0),0)<=6000);
 });

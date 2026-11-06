@@ -181,6 +181,10 @@ export class CommandService {
         }
         if (kind === 'setup' && interaction.type === 3) {
           this.management(interaction);
+          if (action === 'clan-ranking') {
+            if (!this.mobile) throw new UserInputError('Ranking klanu jest niedostępny.');
+            return this.warReportReply(this.mobile.clanRankings.report(guildId),interaction,7);
+          }
           if (action === 'missing') return this.missingReport(interaction, now);
           if (action === 'participants') return this.reply(ServerSetup.participationPanel(userId, guildId, this.database), 7);
           if (action === 'save-participants') {
@@ -279,6 +283,10 @@ export class CommandService {
             if (!Number.isSafeInteger(page) || page < 0) throw new UserInputError('Nieprawidłowa strona.');
             try { return this.warReportReply(this.mobile.warLists.report(guildId, userId, now, page,action==='war-test'),interaction,7); }
             catch (error) { throw new UserInputError(error.message); }
+          }
+          if (action === 'clan-ranking') {
+            if (!this.mobile) throw new UserInputError('Ranking klanu jest niedostępny.');
+            return this.warReportReply(this.mobile.clanRankings.report(guildId),interaction,7);
           }
           if (action === 'missing') return this.missingReport(interaction, now);
           if (ReportDays.kinds.includes(action)) return this.reply(ReportDays.panel(action, userId, this.database.calendar, now), 7);

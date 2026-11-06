@@ -10,44 +10,37 @@ import { CommandService } from '../src/discord/CommandService.js';
 function row(ours,enemies,extra={}) {
  return {war_day:'TEST',payload:JSON.stringify({ours,enemies,own_clan:'PolskaMOC',enemy_clan:'Rywal',own_bonus:{damage:20,health:10},enemy_bonus:{damage:20,health:10},plan:matchWar(ours,enemies),...extra})};
 }
-test('detailed report shows powers, three alternatives, shared and unmatched targets in one message and full file',()=>{
+test('short report: one line per player with a unique rival, chance or power and alternatives, posts only',()=>{
  const r=row([{name:'Strong',power:1.23e9},{name:'Second',power:1.2e9},{name:'Shared',power:1.1e9},{name:'Weak',power:1}],
   [{name:'One',power:1e9},{name:'Two',power:900e6},{name:'TooStrong',power:9e9},{name:'Three',power:800e6}]);
- const view=WarReport.render(r,'u',0,true),text=JSON.stringify(view.embeds),file=view.files[0].data.toString('utf8');
- assert.match(text,/1,23b/);assert.match(text,/900m/);assert.match(text,/Alternatyw|alternatyw/);
- assert.match(text,/Nie jest|nie jest/);assert.doesNotMatch(text,/szansa.*\d+%/i);
- assert.match(file,/Weak/);assert.match(file,/TooStrong/);assert.match(file,/Alternatywa 1/);
- assert.match(file,/1 230 000 000/);assert.equal(view.files.length,1);assert.deepEqual(view.allowed_mentions,{parse:[]});
- assert.ok(!view.additionalMessages);
- const shared=WarReport.render(row([{name:'A',power:100},{name:'B',power:99}],[{name:'C',power:90}]),'u');
- assert.match(shared.files[0].data.toString('utf8'),/Wspólny cel/);
+ const view=WarReport.render(r,'u',0,true),text=view.embeds.map(e=>e.description).join('\n');
+ assert.equal(view.files,undefined);assert.deepEqual(view.allowed_mentions,{parse:[]});
+ assert.match(text,/Format: \*\*gracz\*\* → \*\*przeciwnik\*\*/);
+ const lines=text.split('\n').filter(l=>/→ \*\*/.test(l)&&!l.startsWith('Format'));
+ assert.equal(lines.length,4);
+ const targets=lines.map(l=>l.match(/→ \*\*([^*]+)\*\*/)[1]);
+ assert.equal(new Set(targets).size,4,'every player gets a distinct rival');
+ assert.match(text,/\*\*Weak\*\* → \*\*[^*]+\*\* \(moc -/);
 });
-test('all fifty long unicode names and alternatives survive page limits and the single complete attachment',()=>{
+test('all fifty long unicode names survive Discord limits without attachments',()=>{
  const ours=Array.from({length:50},(_,i)=>({name:`Nasi${i}_${'Ł'.repeat(70)}`,power:1e12+i}));
  const enemies=Array.from({length:50},(_,i)=>({name:`Rywale${i}_${'Ż'.repeat(68)}`,power:1e6+i}));
  const r=row(ours,enemies),first=WarReport.render(r,'u',0,true);
- const pages=Number(first.embeds.at(-1).footer.text.match(/Strona 1\/(\d+)/)[1]);assert.ok(pages>1);
+ const pages=first.embeds.at(-1).footer?Number(first.embeds.at(-1).footer.text.match(/Strona 1\/(\d+)/)[1]):1;
  const seen=[];
  for(let i=0;i<pages;i++) {
   const view=WarReport.render(r,'u',i,true);
-  assert.ok(view.content.length<=2000);assert.ok(view.embeds.length<=10);
+  assert.equal(view.files,undefined);assert.ok(view.embeds.length<=10);
   assert.ok(view.embeds.reduce((n,e)=>n+WarReport.length(e),0)<=6000);
   view.embeds.forEach(e=>assert.ok((e.description?.length??0)<=4096));
-  assert.ok(view.components[0].components.every(b=>b.custom_id.includes(':war-test:')));
-  seen.push(...view.embeds.slice(1).map(e=>e.description));
-  assert.deepEqual(view.files[0].data,first.files[0].data);
+  seen.push(...view.embeds.map(e=>e.description));
  }
- for(const player of ours) {
-  assert.ok(seen.join('\n').includes(WarReport.clean(player.name)));
-  assert.ok(first.files[0].data.toString('utf8').includes(WarReport.clean(player.name)));
- }
- assert.ok(WarReport.render(r,'u',-10).embeds.at(-1).footer.text.startsWith('Strona 1/'));
+ for(const player of ours)assert.ok(seen.join('\n').includes(WarReport.clean(player.name)));
 });
 test('hostile names cannot mention players or inject markdown into the visual report',()=>{
  const view=WarReport.render(row([{name:'@everyone **Admin**\n<@123>',power:100}],[{name:'`enemy`',power:50}]),'u');
  assert.deepEqual(view.allowed_mentions,{parse:[]});
  assert.doesNotMatch(JSON.stringify(view.embeds),/@everyone|<@123>|\*\*Admin\*\*/);
- assert.doesNotMatch(view.files[0].data.toString('utf8'),/@everyone|<@123>/);
 });
 test('multipart attachment keeps every UTF-8 byte and resets attachments on an original-message edit',async()=>{
  const bytes=Buffer.from('\ufeffŁódź — cała lista\n','utf8');
@@ -83,11 +76,9 @@ test('webhook delivery uploads the full file by editing the original private rep
  assert.equal(calls,1);
 });
 
-test('missing attachment permission preserves a readable report rather than failing its delivery',()=>{
+test('reports without attachments are delivered unchanged regardless of attachment permission',()=>{
  const context={reply:CommandService.prototype.reply};
  const view=WarReport.render(row([{name:'A',power:100}],[{name:'B',power:90}]),'u');
  const reply=permissions=>CommandService.prototype.warReportReply.call(context,view,{app_permissions:permissions},7);
- assert.equal(reply('0').data.files,undefined);assert.match(reply('0').data.content,/Załączanie plików/);
- assert.deepEqual(reply('0').data.embeds,view.embeds);assert.deepEqual(reply('0').data.attachments,[]);
- assert.equal(reply('32768').data.files.length,1);assert.equal(reply(undefined).data.files.length,1);
+ assert.equal(reply('0').data.files,undefined);assert.deepEqual(reply('0').data.embeds,view.embeds);
 });

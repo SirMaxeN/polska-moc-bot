@@ -27,9 +27,15 @@ export class ClanRankings {
   const simulated=rows.reduce((n,p)=>n+p.simulated,0)/2;
   const date=new Date(saved.observed_at).toISOString();
   const method='Każdy walczy z każdym bez bonusów wojennych. Wygrana daje 1 pkt, remis ½ pkt. Brak wyniku zastępuje porównanie mocy.';
-  return {content:'📎 Pełny ranking jest w załączniku.',allowed_mentions,
-   embeds:[{title:`🏆 Ranking klanu · ${WarReport.clean(clan)}`,color:0x61d6ac,
-    description:`${method}\n**${rows.length} graczy** · ${simulated}/${pairs} par z symulacji · <t:${Math.floor(saved.observed_at/1000)}:R>\n\n${lines.slice(0,20).join('\n')}`}],
-   files:[{name:'ranking-klanu.txt',data:Buffer.from('\ufeff'+[WarReport.clean(clan),date,method,'',...lines].join('\n')),contentType:'text/plain; charset=utf-8'}]};
+  // Every player is listed; lines are packed into embeds within Discord's 4096/6000 character limits.
+  const header=`${method}\n**${rows.length} graczy** · ${simulated}/${pairs} par z symulacji · <t:${Math.floor(saved.observed_at/1000)}:R>\n\n`;
+  const embeds=[];let current=header,total=0;
+  for(const line of lines) {
+   if(current.length+line.length+1>4000){embeds.push(current);total+=current.length;current='';}
+   current+=(current&&!current.endsWith('\n\n')?'\n':'')+line;
+  }
+  embeds.push(current);
+  return {allowed_mentions,
+   embeds:embeds.map((description,i)=>({...(i===0?{title:`🏆 Ranking klanu · ${WarReport.clean(clan)}`}:{}),color:0x61d6ac,description}))};
  }
 }

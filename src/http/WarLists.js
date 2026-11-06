@@ -30,9 +30,17 @@ export class WarLists {
    return {status:'saved',war_day:day};
   });
  }
+ /** One war list: the locked Sunday list during the war window, otherwise the latest repeatable list with equal bonuses. */
  report(guildId,userId,now,page=0,testMode=false) {
-  const {row}=this.current({guild_id:guildId},testMode);
-  if(!row)return {content:'Nie utworzono jeszcze listy wojennej. Zeskanuj obydwa klany w aplikacji.',embeds:[],components:[],attachments:[],allowed_mentions:{parse:[]}};
-  return WarReport.render(row,userId,page,testMode);
+  const find=day=>this.database.db.prepare('SELECT * FROM war_lists WHERE guild_id=? AND war_day=?').get(guildId,day);
+  const sunday=testMode?null:battleWindow(new Date(this.clock()));
+  const real=sunday?find(sunday):null;
+  // The preview list belongs to the current game week and disappears with the Monday 00:00 UTC reset.
+  const calendar=this.database.calendar;
+  const weekStart=calendar?calendar.boundary(calendar.cycle(new Date(this.clock())).monday).getTime():-Infinity;
+  const preview=find('TEST');
+  const row=real??(preview&&Date.parse(preview.created_at)>=weekStart?preview:null);
+  if(!row)return {content:'Nie utworzono jeszcze listy wojennej. Uruchom „Lista wojenna” w aplikacji.',embeds:[],components:[],attachments:[],allowed_mentions:{parse:[]}};
+  return WarReport.render(row,userId,page,!real);
  }
 }

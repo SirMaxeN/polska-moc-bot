@@ -1,4 +1,3 @@
-import { battleWindow } from '../domain/WarPreparation.js';
 export class Navigation {
   static welcome() {
     return [{ type: 1, components: [
@@ -24,9 +23,9 @@ export class Navigation {
   static reports(userId, now = new Date()) {
     return [{ type: 1, components: [
       ['player', 'Mój raport', '📊'], ['clan', 'Raport klanu', '👥'], ['clan-details', 'Szczegóły klanu', '📋'], ['clan-ultra', 'Ultra szczegóły', '🔎'], ['resources', 'Zasoby klanu', '🎒'],
-    ].map(([kind, label, name]) => ({ type: 2, style: 2, label, disabled: kind==='war-list' && !battleWindow(now), emoji: { name }, custom_id: `report:${userId}:${kind}:0` })) },
+    ].map(([kind, label, name]) => ({ type: 2, style: 2, label, emoji: { name }, custom_id: `report:${userId}:${kind}:0` })) },
     { type: 1, components: [
-      ['selected', 'Wybrani gracze', '📌'], ['updated', 'Dzisiejsze aktualizacje', '✅'], ['missing', 'Brakujące aktualizacje', '📋'], ['war-list', 'Lista wojenna', '⚔️'],
-    ].map(([kind, label, name]) => ({ type: 2, style: 2, label, disabled: kind==='war-list' && !battleWindow(now), emoji: { name }, custom_id: `report:${userId}:${kind}:0` })) }];
+      ['selected', 'Wybrani gracze', '📌'], ['updated', 'Dzisiejsze aktualizacje', '✅'], ['missing', 'Brakujące aktualizacje', '📋'], ['war-list', 'Lista wojenna', '⚔️'], ['clan-ranking', 'Ranking klanu', '🏆'],
+    ].map(([kind, label, name]) => ({ type: 2, style: 2, label, emoji: { name }, custom_id: `report:${userId}:${kind}:0` })) }];
   }
 }

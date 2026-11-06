@@ -37,7 +37,7 @@ test('one immutable report per Discord guild and day, idempotent retry and isola
  assert.equal(lists.save(device,body).status,'saved');
  assert.throws(()=>lists.save({...device,user_id:'another'}, {...body,request_id:randomUUID()}),/istnieje/);
  assert.equal(lists.status({guild_id:'other'}).locked,false);
- assert.match(reportText(lists.report('guild1','member1',new Date(now))),/orientacyjny/);
+ assert.match(reportText(lists.report('guild1','member1',new Date(now))),/według mocy/);
  now=Date.parse('2026-11-02T00:00:00Z');assert.throws(()=>lists.save(device,body),/niedzieli/);
 });
 test('incomplete or duplicate roster never consumes the weekly lock',t=>{
@@ -55,7 +55,7 @@ test('extra allies retain one explicitly shared primary and up to three separate
 test('fifty long unmatchable names remain within Discord message limits',t=>{
  const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());const now=Date.parse('2026-11-01T12:00:00Z');const lists=new WarLists(db,()=>now);
  lists.save({guild_id:'1',user_id:'2'},{request_id:randomUUID(),war_day:'2026-11-01',observed_at:new Date(now).toISOString(),ours:[{name:'a',power:1}],enemies:Array.from({length:50},(_,i)=>({name:String(i)+'x'.repeat(70),power:100})),our_count:1,enemy_count:50,own_bonus:{damage:0,health:0},enemy_bonus:{damage:0,health:0}});
- for(let i=0;i<8;i++) assert.ok(lists.report('1','2',new Date(now),i).content.length<=2000);
+ for(let i=0;i<8;i++){const v=lists.report('1','2',new Date(now),i);assert.ok(v.embeds.reduce((n,e)=>n+(e.description?.length??0),0)<=6000);assert.equal(v.files,undefined);}
 });
 test('paired-phone HTTP status and upload are authenticated and shared lock survives another member',async t=>{
  const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());const now=Date.parse('2026-11-01T12:00:00Z');
@@ -108,8 +108,9 @@ test('Discord menu exposes the time-gated war report and dispatches it for ordin
  const mobile=new MobileSync(db,scoring,{clock:()=>now.getTime()});
  const commands=new CommandService(db,new ReportService(calendar,scoring),scoring,mobile);
  const button=date=>Navigation.reports('u',date).flatMap(row=>row.components).find(x=>x.custom_id==='report:u:war-list:0');
- assert.equal(button(now)?.disabled,false);
- assert.equal(button(new Date('2026-11-03T12:00:00Z'))?.disabled,true);
+ // The war list is always available: Sunday list in the war window, otherwise the equal-bonus preview.
+ assert.ok(button(now)&&!button(now).disabled);
+ assert.ok(button(new Date('2026-11-03T12:00:00Z'))&&!button(new Date('2026-11-03T12:00:00Z')).disabled);
  const interaction={id:'id',type:3,guild_id:'g',member:{user:{id:'u',username:'Player'},permissions:'0'},data:{custom_id:'report:u:war-list:0'}};
  const empty=await commands.handle(interaction,now);
  assert.equal(empty.type,7);
@@ -135,8 +136,9 @@ test('test war reports work on Tuesday, force equal bonuses, are repeatable and 
  const body={request_id:randomUUID(),observed_at:new Date(now).toISOString(),ours:[{name:'ally',power:100}],enemies:[{name:'enemy',power:90}],our_count:1,enemy_count:1,own_bonus:{damage:100,health:100},enemy_bonus:{damage:100000,health:100000}};
  lists.save(device,body,true);
  const report=lists.report(device.guild_id,'u',new Date(now),0,true);
- assert.match(reportText(report),/TEST/);assert.match(reportText(report),/ally/);assert.match(reportText(report),/enemy/);
- assert.equal(report.files.length,1);assert.deepEqual(report.components,[]);
+ assert.match(reportText(report),/poza niedzielą/);assert.match(reportText(report),/ally/);
+ assert.match(reportText(lists.report(device.guild_id,'u',new Date(now))),/poza niedzielą/);assert.match(reportText(report),/enemy/);
+ assert.equal(report.files,undefined);assert.deepEqual(report.components,[]);
  lists.save(device,{...body,request_id:randomUUID()},true);
  const stored=JSON.parse(db.db.prepare('SELECT payload FROM war_lists WHERE guild_id=? AND war_day=?').get(device.guild_id,'TEST').payload);
  assert.deepEqual(stored.enemy_bonus,stored.own_bonus);
@@ -153,5 +155,16 @@ test('war upload rejects scanning own clan twice, without creating a report or l
  assert.equal(db.db.prepare('SELECT count(*) n FROM war_lists').get().n,0);
  lists.save(device,body,true);
  const rendered=reportText(lists.report('g','u',new Date(now),0,true));
- assert.match(rendered,/Clan A PL/);assert.match(rendered,/Clan B PL/);
+ const plainText=lists.report('g','u',new Date(now),0,true).embeds.map(e=>e.description).join('\n');
+ assert.ok(rendered.length>0);assert.ok(plainText.includes('Clan A \\[PL\\]'));assert.ok(plainText.includes('Clan B \\[PL\\]'));
+});
+
+test('preview war list disappears with the weekly reset and the start menu offers ranking',t=>{
+ const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());
+ let now=Date.parse('2026-11-06T12:00:00Z');const lists=new WarLists(db,()=>now);const device={guild_id:'g',user_id:'u'};
+ lists.save(device,{request_id:randomUUID(),observed_at:new Date(now).toISOString(),ours:[{name:'ally',power:100}],enemies:[{name:'enemy',power:90}],our_count:1,enemy_count:1,own_bonus:{damage:0,health:0}},true);
+ assert.match(reportText(lists.report('g','u',new Date(now))),/ally/);
+ now=Date.parse('2026-11-08T23:59:00Z');assert.match(reportText(lists.report('g','u',new Date(now))),/ally/);
+ now=Date.parse('2026-11-09T00:01:00Z');assert.match(lists.report('g','u',new Date(now)).content,/Nie utworzono/);
+ assert.ok(Navigation.reports('u').flatMap(r=>r.components).some(b=>b.custom_id==='report:u:clan-ranking:0'));
 });

@@ -103,10 +103,12 @@ export function planHybridWar(plan,ours,enemies,ownBonus,enemyBonus) {
  const span=2*(ours.length+1);
  // First maximize distinct feasible targets. Then maximize the count backed by simulation.
  // Nearby power ranks decide similar matchups and keep stronger allies available for stronger targets.
- const primary=maximumWeightAssignment(options.map(row=>row.map(c=>c.eligible?span*span+(c.source==='simulation'?span:0)+c.priority:0)));
+ // Then give every remaining ally a distinct remaining rival (best available chance), so nobody shares
+ // a target while free rivals exist. Favourable pairs always outweigh any number of unfavourable ones.
+ const primary=maximumWeightAssignment(options.map(row=>row.map(c=>c.eligible?span*span+(c.source==='simulation'?span:0)+c.priority:(1+c.priority)/(4*span))));
  const assignments=plan.assignments.map((player,i)=>{
   const choices=options[i].filter(c=>c.eligible).sort((x,y)=>Number(y.source==='simulation')-Number(x.source==='simulation')||y.priority-x.priority||x.name.localeCompare(y.name));
-  const target=options[i][primary[i]]??choices[0];
+  const target=options[i][primary[i]]??choices[0]??[...options[i]].sort((x,y)=>y.priority-x.priority)[0];
   return {...player,main:target?.name??null,mainSource:target?.source??null,shared:!!target&&primary[i]<0,
    alternatives:[],eligibleTargets:choices.map(c=>({name:c.name,quality:c.quality,source:c.source})),
    note:target?null:player.matchups.some(r=>r.error)?'Brak celu z przewagą w symulacji lub według mocy':'Brak celu z przewagą w symulacji'};
