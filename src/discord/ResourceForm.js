@@ -2,6 +2,7 @@ import { NumberParser } from '../domain/NumberParser.js';
 import { UserInputError } from '../domain/UserInputError.js';
 import { ReportService } from './ReportService.js';
 import { Navigation } from './Navigation.js';
+import { randomUUID } from 'node:crypto';
 
 export class ResourceForm {
   static fields = [
@@ -13,7 +14,8 @@ export class ResourceForm {
   ];
 
   static open(userId, player) {
-    return { type: 9, data: { custom_id: `resources:${userId}:save`, title: '✏️ Aktualizuj swoje zasoby',
+    // A unique modal instance prevents Discord from restoring a stale, unsent client draft.
+    return { type: 9, data: { custom_id: `resources:${userId}:save:${randomUUID()}`, title: '✏️ Aktualizuj swoje zasoby',
       components: this.fields.map(([key, label], index) => ({ type: 18, label,
         ...(index === 0 ? { description: 'W każdym polu: + - * / i nawiasy, np. 3+5*3=18 lub (3+5)*5-2=38. Wpisz samo działanie.' } : {}),
         component: { type: 4, custom_id: key, style: 1, required: false, max_length: 128,
@@ -25,7 +27,7 @@ export class ResourceForm {
   }
 
   static costs(userId, player) {
-    return { type: 9, data: { custom_id: `resources:${userId}:save-costs`, title: '⚙️ Koszty przywołań',
+    return { type: 9, data: { custom_id: `resources:${userId}:save-costs:${randomUUID()}`, title: '⚙️ Koszty przywołań',
       components: [
         ['skill_cost_x5', '🎟️ Koszt 5 umiejętności', 200],
         ['mount_cost', '🔑 Koszt 1 wierzchowca', 50],

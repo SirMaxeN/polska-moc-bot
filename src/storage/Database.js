@@ -71,7 +71,8 @@ export class Database {
   }
 
   ensure(guildId, now = new Date()) {
-    const cycle = this.calendar.cycle(now).id;
+    const current = this.calendar.cycle(now);
+    const cycle = current.id;
     this.transaction(() => {
       const guild = this.db.prepare('SELECT * FROM guilds WHERE id=?').get(guildId);
       if (!guild) {
@@ -79,7 +80,10 @@ export class Database {
         const insert = this.db.prepare('INSERT INTO tech VALUES(?,?,?)');
         for (const [key, , value] of Technology.entries) insert.run(guildId, key, value);
       } else if (guild.cycle < cycle) {
-        this.db.prepare('DELETE FROM resources WHERE guild_id=?').run(guildId);
+        // A delayed reset or calendar correction must retain resources updated after
+        // the actual game boundary, including saves during the old schedule's extra hour.
+        this.db.prepare('DELETE FROM resources WHERE guild_id=? AND updated_at<?')
+          .run(guildId, this.calendar.boundary(current.monday).toISOString());
         this.db.prepare('UPDATE guilds SET cycle=? WHERE id=?').run(cycle, guildId);
         this.db.prepare('INSERT OR IGNORE INTO reset_events VALUES(?,?,?,?,?)')
           .run(guildId, 'weekly', cycle, null, now.toISOString());
@@ -108,7 +112,7 @@ export class Database {
       WHERE p.guild_id=? AND p.user_id=?`).get(guildId, userId);
   }
 
-  update(guildId, userId, name, values, now = new Date()) {
+  update(guildId, userId, name, values, now = new Date(), afterWrite = () => {}) {
     this.ensure(guildId, now);
     return this.transaction(() => {
       this.db.prepare(`INSERT INTO players(guild_id,user_id,name) VALUES(?,?,?)
@@ -125,7 +129,9 @@ export class Database {
         this.db.prepare(`UPDATE resources SET ${fields.map(field => `${field}=?`).join(',')},updated_at=?
           WHERE guild_id=? AND user_id=?`).run(...fields.map(field => values[field]), now.toISOString(), guildId, userId);
       }
-      return this.profile(guildId, userId);
+      const player = this.profile(guildId, userId);
+      afterWrite(player);
+      return player;
     });
   }
 

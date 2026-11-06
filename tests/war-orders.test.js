@@ -29,8 +29,8 @@ test('war orders require configured roles, owner and current access; publish onl
   assert.equal(menu.data.flags,64);
   assert.equal(menu.data.components.length,5);
   const buttons=menu.data.components.flatMap(row=>row.components);
-  assert.equal(buttons.length,13);
-  assert.equal(new Set(buttons.map(button=>button.custom_id)).size,13);
+  assert.equal(buttons.length,15);
+  assert.equal(new Set(buttons.map(button=>button.custom_id)).size,15);
   const click={...base,type:3,data:{custom_id:buttons[0].custom_id}};
   const outsider=await commands.handle({...click,member:{...base.member,user:{id:'99'}}},now);
   assert.match(outsider.data.content,/innego gracza/);

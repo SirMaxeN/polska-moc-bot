@@ -86,7 +86,7 @@ test('current day countdown uses the next Warsaw boundary, including DST and min
   };
   check('2026-10-13T13:00:00Z', 1, /koniec za 11 godz\./);
   check('2026-10-13T23:58:30Z', 1, /koniec za 2 min/);
-  check('2026-10-25T00:00:00Z', 6, /koniec za 25 godz\./);
+  check('2026-10-25T00:00:00Z', 6, /koniec za 24 godz\./);
   const time = new Date('2026-10-13T13:00:00Z');
   assert.doesNotMatch(reports.header(reports.calendar.cycle(time), 2, time), /koniec za/);
   assert.doesNotMatch(reports.header(reports.calendar.cycle(time), 3, time), /koniec za/);
@@ -276,14 +276,15 @@ test('reports use private pages, match totals and respect Discord embed limits',
   }
   assert.equal(singleFields.filter(field => field.name.includes('Dzień 6:')).length, 1);
   const ultraReply = await commands.handle(command('report', [{ name: 'clan-ultra' }]), now);
-  assert.equal(ultraReply.response.data.flags, 64);
+  assert.equal(ultraReply.data.flags, 64);
+  assert.ok(ultraReply.data.components[0].components[0].custom_id.startsWith('report-days:'));
   const small = reports.render('clan-details', snapshot, '11', now);
   assert.equal(small.additionalMessages, undefined);
   assert.equal(small.embeds[0].fields.filter(field => field.name.startsWith('Suma klanu:')).length, 5);
   const click = custom_id => ({ ...command(''), type: 3, data: { custom_id } });
   const clicked = await commands.handle(click('report:11:clan-details:0'), now);
-  assert.equal(clicked.response.type, 7);
-  assert.ok(clicked.followUps.every(message => message.flags === 64));
+  assert.equal(clicked.type, 7);
+  assert.match(clicked.data.content, /wybierz dni/);
   const rejected = await commands.handle({ ...click('report:11:clan-details:0'), member: { user: { id: '99' } } }, now);
   assert.match(rejected.data.content, /innego gracza/);
 });

@@ -1,3 +1,5 @@
+import { compareNames } from './PlayerOrder.js';
+
 export class ParticipationReminders {
   static rosterCaches = new WeakMap();
   constructor(database, token, request = fetch) {
@@ -64,7 +66,7 @@ export class ParticipationReminders {
   }
 
   static outsiderNames(status) {
-    return (status?.outsiders ?? []).join('\n');
+    return [...(status?.outsiders ?? [])].sort(compareNames).join('\n');
   }
 
   static outsiderMessages(status) {
@@ -93,12 +95,11 @@ export class ParticipationReminders {
       return [{ content: '⚠️ Nie udało się sprawdzić listy uczestników. Zarząd: sprawdź Server Members Intent i dostęp bota. Lista brakujących aktualizacji jest chwilowo niedostępna.', allowed_mentions: { parse: [] } }];
     }
     const calendar = this.database.calendar;
-    let key = calendar.dateKey(now);
-    if (calendar.local(now).hour < 2) key = calendar.shift(key, -1);
+    const key = now.toISOString().slice(0, 10);
     const start = calendar.boundary(key);
     const players = new Map(snapshot.players.map(player => [player.user_id, player]));
     const missing = [], stale = [];
-    for (const member of status.participants) {
+    for (const member of [...status.participants].sort((a, b) => compareNames(a.nick || a.user.global_name || a.user.username, b.nick || b.user.global_name || b.user.username))) {
       const player = players.get(member.user.id);
       if (!player) missing.push(`❗ ${ParticipationReminders.displayName(member)}`);
       else if (!player.updated_at || Date.parse(player.updated_at) < start.getTime()) stale.push(ParticipationReminders.displayName(member));

@@ -1,4 +1,5 @@
 export class WarCalendar {
+  static resetDescription = '00:00 UTC (01:00 zimą / 02:00 latem w Polsce)';
   constructor() {
     this.formatter = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -23,14 +24,13 @@ export class WarCalendar {
   }
 
   boundary(key) {
-    // Warsaw uses UTC+1/+2. Earliest match resolves the repeated DST hour.
-    const midnight = Date.parse(`${key}T00:00:00Z`);
-    for (const hours of [0, 1, 2]) {
-      const candidate = new Date(midnight + hours * 3600000);
-      const p = this.local(candidate);
-      if (this.dateKey(candidate) === key && p.hour >= 2) return candidate;
-    }
-    throw new Error('Cannot resolve Warsaw calendar boundary.');
+    // The game resets at a fixed UTC instant, not at a fixed Polish wall-clock hour.
+    return new Date(`${key}T00:00:00Z`);
+  }
+
+  boundaryTime(key) {
+    const parts = this.local(this.boundary(key));
+    return `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`;
   }
 
   cycle(now = new Date()) {

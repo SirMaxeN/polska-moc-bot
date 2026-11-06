@@ -1,3 +1,4 @@
+import { ResourceImport } from './ResourceImport.js';
 import { NumberParser } from '../domain/NumberParser.js';
 import { Technology } from '../domain/Technology.js';
 import { UserInputError } from '../domain/UserInputError.js';
@@ -9,15 +10,26 @@ import { PlayerHelp } from './PlayerHelp.js';
 import { ServerSetup } from './ServerSetup.js';
 import { ParticipationReminders } from './ParticipationReminders.js';
 import { WeeklyReminders } from './WeeklyReminders.js';
+import { SelectedReport } from './SelectedReport.js';
+import { ReportDays } from './ReportDays.js';
 
 export class CommandService {
-  constructor(database, reports, scoring) { this.database = database; this.reports = reports; this.scoring = scoring; this.orders = new WarOrders(database); }
+  constructor(database, reports, scoring, mobile = null) { this.database = database; this.reports = reports; this.scoring = scoring; this.orders = new WarOrders(database); this.mobile = mobile; this.selectedReports = new SelectedReport(); }
   reply(data, type = 4) {
     return { type, data: { ...(typeof data === 'string' ? { content: data } : data),
       ...(type === 4 ? { flags: 64 } : {}), allowed_mentions: { parse: [] } } };
   }
+  warReportReply(data, interaction, type = 4) {
+    if (data.files?.length && /^\d+$/.test(interaction.app_permissions ?? '') && !(BigInt(interaction.app_permissions) & (1n << 15n))) {
+      const { files, ...view } = data;
+      return this.reply({ ...view, attachments: [], content: view.components.length
+        ? 'Pełną listę przejrzysz przyciskami w tej wiadomości. Bot nie ma na tym kanale uprawnienia „Załączanie plików”.'
+        : 'Pełny raport poniżej. Bot nie ma na tym kanale uprawnienia „Załączanie plików”.' }, type);
+    }
+    return this.reply(data, type);
+  }
   reportReply(kind, snapshot, userId, now, type = 4, guildId) {
-    if (kind !== 'player' && guildId && this.database.participationRoles(guildId).length) {
+    if (!['player', 'selected', 'updated'].includes(kind) && guildId && this.database.participationRoles(guildId).length) {
       return { eagerReport: true, response: { type: 5, data: { flags: 64 } }, complete: async () => {
         let enrollment;
         try { enrollment = await new ParticipationReminders(this.database, WeeklyReminders.tokenFromEnvironment()).enrollment(guildId, snapshot.players); }
@@ -75,6 +87,15 @@ export class CommandService {
       const snapshot = () => this.database.snapshot(guildId, now);
       if (interaction.type === 2) {
         const { name, options = [] } = interaction.data;
+        if (name === 'import') return this.saveResources(interaction, ResourceImport.parse(options.find(option => option.name === 'dane')?.value), now, snapshot().tech);
+        if (name === 'mobile' && this.mobile) {
+          if (options[0]?.name === 'revoke') {
+            this.mobile.revoke(guildId, userId);
+            return this.reply('Odłączono wszystkie telefony od Twoich danych na tym serwerze.');
+          }
+          const code = this.mobile.code(guildId, userId, interaction.member.nick ?? user.global_name ?? user.username);
+          return this.reply(`**📱 Połącz Botysław Skaner**\nW aplikacji wybierz **Opcje → Połącz z Discordem** i wklej ten jednorazowy kod:\n\n\`${code}\`\n\nWażny 10 minut. Nie udostępniaj go innym. Telefon będzie aktualizował tylko Twoje dane na tym serwerze. Nowe połączenie zastąpi stare. Cofnięcie dostępu: **/mobile revoke**.`);
+        }
         if (name === 'hello') { this.management(interaction); return { type: 4, data: { flags: 0, allowed_mentions: { parse: [] }, embeds: [{ title: '👋 Cześć, klanie! Jestem BotysławSmith!', description: 'Pomagam ogarnąć zasoby, policzyć potencjał wojenny i przekazać rozkazy. Kliknij **Start** pod tą wiadomością, aby otworzyć swoje prywatne menu. Korzystaj z przycisków poniżej: **Start** do danych i raportów albo **Pomoc** do instrukcji. Nie musisz wpisywać komend! ⚔️', color: 0xc72c3b, image: { url: 'https://komars.eu/discord/botyslaw-smith/banner.png' } }], components: Navigation.welcome() } }; }
         if (name === 'setup') { this.management(interaction); return this.reply(ServerSetup.panel(userId, guildId, this.database, this.orders, now)); }
         if (name === 'ping-setup') { this.management(interaction); return this.reply(this.orders.setup(userId, guildId)); }
@@ -104,8 +125,19 @@ export class CommandService {
         }
         const sub = options[0];
         if (name === 'report') {
+          if (sub?.name === 'clan-ranking') {
+            if (!this.mobile) throw new UserInputError('Ranking klanu jest niedostępny.');
+            return this.warReportReply(this.mobile.clanRankings.report(guildId),interaction);
+          }
+          if (['war-list','war-test'].includes(sub?.name)) {
+            if (!this.mobile) throw new UserInputError('Lista wojenna nie jest dostępna.');
+            try { return this.warReportReply(this.mobile.warLists.report(guildId, userId, now,0,sub.name==='war-test'),interaction); }
+            catch (error) { throw new UserInputError(error.message); }
+          }
           if (sub?.name === 'missing') return this.missingReport(interaction, now);
-          if (!['player', 'clan', 'clan-details', 'clan-ultra', 'resources'].includes(sub?.name)) throw new UserInputError('Nieznany raport.');
+          if (ReportDays.kinds.includes(sub?.name)) return this.reply(ReportDays.panel(sub.name, userId, this.database.calendar, now));
+          if (sub?.name === 'selected') return this.reply(this.selectedReports.open(userId, guildId, snapshot(), this.database.calendar, now));
+          if (!['player', 'clan', 'clan-details', 'clan-ultra', 'resources', 'updated'].includes(sub?.name)) throw new UserInputError('Nieznany raport.');
           return this.reportReply(sub.name, snapshot(), userId, now, 4, guildId);
         }
         if (name === 'tech') {
@@ -136,6 +168,17 @@ export class CommandService {
         }
         const [kind, owner, action, rawPage] = interaction.data.custom_id.split(':');
         if (owner !== userId) throw new UserInputError('Ten panel należy do innego gracza.');
+        if (['report-days', 'report-show'].includes(kind) && interaction.type === 3) {
+          if (!ReportDays.kinds.includes(action)) throw new UserInputError('Nieznany raport.');
+          if (rawPage !== this.database.calendar.cycle(now).id) throw new UserInputError('Panel pochodzi z poprzedniego tygodnia. Otwórz raport ponownie.');
+          const days = ReportDays.validate(kind === 'report-days' ? interaction.data.values : interaction.data.custom_id.split(':')[4]?.split(','));
+          return kind === 'report-days' ? this.reply(ReportDays.panel(action, userId, this.database.calendar, now, days), 7)
+            : this.reportReply(action, { ...snapshot(), reportDays: days }, userId, now, 4, guildId);
+        }
+        if (kind === 'selected' && interaction.type === 3) {
+          const result = this.selectedReports.handle(rawPage, action, interaction.data.values, userId, guildId, snapshot(), this.database.calendar, now);
+          return result.report ? this.reportReply('selected', result.report, userId, now, 4, guildId) : this.reply(result.panel, 7);
+        }
         if (kind === 'setup' && interaction.type === 3) {
           this.management(interaction);
           if (action === 'missing') return this.missingReport(interaction, now);
@@ -230,9 +273,18 @@ export class CommandService {
           return this.saveResources(interaction, values, now, snapshot().tech);
         }
         if (['report', 'report-page'].includes(kind) && interaction.type === 3) {
+          if (['war-list','war-test'].includes(action)) {
+            if (!this.mobile) throw new UserInputError('Lista wojenna nie jest dostępna.');
+            const page = Number(rawPage);
+            if (!Number.isSafeInteger(page) || page < 0) throw new UserInputError('Nieprawidłowa strona.');
+            try { return this.warReportReply(this.mobile.warLists.report(guildId, userId, now, page,action==='war-test'),interaction,7); }
+            catch (error) { throw new UserInputError(error.message); }
+          }
           if (action === 'missing') return this.missingReport(interaction, now);
+          if (ReportDays.kinds.includes(action)) return this.reply(ReportDays.panel(action, userId, this.database.calendar, now), 7);
+          if (action === 'selected') return this.reply(this.selectedReports.open(userId, guildId, snapshot(), this.database.calendar, now), 7);
           const page = Number(rawPage);
-          if (!['player', 'clan', 'clan-details', 'clan-ultra', 'resources'].includes(action) || !Number.isSafeInteger(page) || page < 0) throw new UserInputError('Nieprawidłowa strona.');
+          if (!['player', 'clan', 'clan-details', 'clan-ultra', 'resources', 'updated'].includes(action) || !Number.isSafeInteger(page) || page < 0) throw new UserInputError('Nieprawidłowa strona.');
           return this.reportReply(action, snapshot(), userId, now, 7, guildId);
         }
         if (kind === 'tech') {

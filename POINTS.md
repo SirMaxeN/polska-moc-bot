@@ -35,7 +35,7 @@ English names are descriptive translations, not verified official game labels. S
 
 ## Screenshot daily schedule
 
-Day 1 starts Tuesday 02:00 Europe/Warsaw. Days 1–6 run Tuesday–Sunday and end Monday 02:00; Monday after 02:00 is preparation.
+Day 1 starts Tuesday 00:00 UTC. Days 1–6 end Monday 00:00 UTC; Monday after reset is preparation. Reset is 01:00 in winter and 02:00 in summer in Poland.
 1. Forge; four dungeon types; skill summons/upgrades.
 2. Forge coins/gems; research I–V; mount summons/merges.
 3. Forge; skill summons/upgrades; egg hatching; pet merges.

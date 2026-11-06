@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { Navigation } from './Navigation.js';
 import { ParticipationReminders } from './ParticipationReminders.js';
 import { DailyReminders } from './DailyReminders.js';
+import { WarCalendar } from '../domain/WarCalendar.js';
 
 export class WeeklyReminders {
   constructor(database, { token, request = fetch, logger = console } = {}) {
@@ -24,7 +25,7 @@ export class WeeklyReminders {
   static message() {
     return { content: '**🔔 Nowy tydzień: zaktualizuj dane w Botysławie!**\n'
       + 'Zakończyliśmy wojnę i wyzerowaliśmy tygodniowe zasoby. Wpisz **/update**, aby podać aktualne bilety, klucze, młotki, zwierzaki lub jajka do połączenia i wierzchowce. Twoje koszty przywołań pozostają zapisane.\n'
-      + 'Dzień 1 nowej wojny zaczyna się we wtorek o **02:00**. Główne menu otworzysz przez **/start**.',
+      + `Dzień 1 nowej wojny zaczyna się we wtorek o **${WarCalendar.resetDescription}**. Główne menu otworzysz przez **/start**.`,
     allowed_mentions: { parse: [] }, components: Navigation.welcome() };
   }
 

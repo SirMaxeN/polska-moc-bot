@@ -18,7 +18,15 @@ Change the desired fields and submit the form. Blank fields preserve saved value
 |---|---|
 | /report player | Own resources and potential for all six days, category subtotals and unit rates |
 | /report clan | Daily sums for all players with resources entered this cycle |
-| /report clan-details | Each player's daily potential and update time, with clan totals; all days without pagination |
+| /report clan-details | Select war days (current day by default, multiple days or all); each player's potential and update time, with clan totals |
+| /report selected | Choose entered players and a war day; show each resource stock, points per resource on that day, player totals and combined resource/point sums |
+| /report updated | Players who first entered or updated resources since today's 00:00 UTC game reset, including their update times |
+
+Player lists in reports are sorted by nickname using Polish alphabetical ordering (case-insensitive). War days retain chronological order. The same ordering applies to missing-update lists and additional entries outside participation roles.
+
+The **Wybrani gracze** and **Dzisiejsze aktualizacje** buttons are available in the private menu and reports. Selected-player panels keep choices across pages of 25 players and day changes for 30 minutes, only for their owner and server and within the same weekly cycle. A report uses the latest saved resources and technology; it does not reconstruct historical scores. Day 6 explicitly has no forecast and no numeric sum. Changing costs alone does not count as today's resource update. Today follows the fixed 00:00 UTC reset, including winter time in Poland.
+
+Selected-player resource rows show all five stored stocks and their contribution on the chosen day (zero when inactive). Mount-key points include summoning and merging the newly summoned mounts; owned-mount points include only their merges. Costs and rounding are applied individually before summing players. Dungeon points are separate and explicitly assume eight keys per player on days 1 and 4. The summary includes combined stocks and points per resource, plus the full total including dungeons. Stocks are current and are not automatically deducted between day scenarios.
 
 Each member entry explicitly labels its last resource-save timestamp `Aktualizacja:` in Europe/Warsaw. Cost-only updates do not refresh that resource timestamp.
 
@@ -62,13 +70,13 @@ The full SirMaxeN example above produces approximately 145804, 120960, approxima
 
 ## Full detailed report
 
-The detailed clan report displays all six days immediately and each active player on forecast days 1–5. Day 6 contains one shared no-forecast/exclusion explanation. There are no Previous/Next controls. Each player retains the resource update timestamp, and each day includes one clan total and exclusions. Content is packed into messages under Discord embed limits; overflow is delivered automatically as ordered ephemeral follow-up messages. Each part retains report and edit buttons. Legacy pagination buttons are accepted but now display the full report.
+The detailed and ultra clan reports first open a day selector. The current game day is selected by default; on the Monday preparation day the default is all six days. Select one or several days, or All days, and press Show report. Only selected days are rendered, in chronological order, with every entered player's latest resource state regardless of their update date. Day 6 contains one shared no-forecast/exclusion explanation. Each player retains the resource update timestamp, and each forecast day includes one clan total and exclusions. Content is packed into messages under Discord embed limits; overflow is delivered automatically as ordered ephemeral follow-up messages. Each part retains report and edit buttons. Legacy pagination buttons open the new day selector. Selectors from previous weeks are rejected.
 
 ## Public greetings and restricted war orders
 
 /hello is administrator-only and publishes a short greeting with the banner and shared Help/Start buttons. Those buttons open private responses for the clicking member.
 
-/ping opens a private five-row panel with thirteen orders, including an update-data reminder. Runtime access requires a configured role; Administrator alone does not bypass the allowed-role check. Public order delivery uses the configured recipient and strict allowed_mentions. Ownership and current roles are rechecked on every click. There is no application cooldown; interaction retries are deduplicated.
+/ping opens a private five-row panel with fifteen orders, including an update-data reminder and separate immediate egg-only hatching and technology-only research orders. The immediate orders are distinct from planning hatching or research for tomorrow. Runtime access requires a configured role; Administrator alone does not bypass the allowed-role check. Public order delivery uses the configured recipient and strict allowed_mentions. Ownership and current roles are rechecked on every click. There is no application cooldown; interaction retries are deduplicated.
 
 ## Configurable ping recipients and shared welcome buttons
 
@@ -85,7 +93,7 @@ Mass mentions require the bot's MENTION_EVERYONE permission in the current chann
 
 ## Weekly calendar and removal
 
-War days are Tuesday, Wednesday, Thursday, Friday, Saturday and Sunday. Each begins at 02:00 Europe/Warsaw. Day 6 ends Monday 02:00, when weekly resources reset. Monday after 02:00 is preparation for the next war. Personal costs and technology survive.
+War days are Tuesday, Wednesday, Thursday, Friday, Saturday and Sunday. Each begins at 00:00 UTC (01:00 winter / 02:00 summer in Poland). Day 6 ends Monday 00:00 UTC, when weekly resources reset. Monday after reset is preparation for the next war. Personal costs and technology survive.
 
 /delete (administrator only) lists current-week players. Select one or more to remove their current-week resources and report membership. Costs and profiles remain, and a player can rejoin using /update. Lists over 25 members have separate selection pages. Old-week selectors cannot remove current-week entries.
 
@@ -98,7 +106,7 @@ The /setup overview includes a Preview reminder button. It sends a new ephemeral
 
 /report clan-ultra provides each player’s daily points broken down by action, with clan totals. Both detailed reports use bold player names, separated blocks and indented italic update timestamps with a clock icon. Player color markers are removed; colors indicate day status only. All report types stay in one private message when the complete report fits Discord embed limits. Otherwise each day starts a new message; an oversized day continues in additional messages, with continuation headers only at the beginning of those messages. Exclusions appear once per day; day 6 remains a shared no-forecast entry. All parts are sent privately without pagination.
 
-Daily reminders: every day at 20:00 Europe/Warsaw, on the same configured channel as the Monday 02:00 reset reminder. Day-specific action lists distinguish forecasted and excluded points; Monday requests starting resources. No automatic role/everyone mentions. /setup shows the next daily time, separate last successful daily and weekly deliveries, and an admin-only private preview of all seven daily messages plus the reset message. Existing minute maintenance handles delivery, durable date-keyed claims, retries and deduplication. Missed daily messages may catch up that evening only; previous dates expire. No new scheduler or slash command registration is required.
+Daily reminders: every day at 20:00 Europe/Warsaw, on the same configured channel as the Monday 00:00 UTC reset reminder. Day-specific action lists distinguish forecasted and excluded points; Monday requests starting resources. No automatic role/everyone mentions. /setup shows the next daily time, separate last successful daily and weekly deliveries, and an admin-only private preview of all seven daily messages plus the reset message. Existing minute maintenance handles delivery, durable date-keyed claims, retries and deduplication. Missed daily messages may catch up that evening only; previous dates expire. No new scheduler or slash command registration is required.
 
 /hello explicitly invites players to click Start below the welcome for their private menu, or Help for instructions. Prefer this shared button entry point on the bot channel; players do not need to type commands.
 
@@ -128,7 +136,7 @@ Resource roster adds maximum points beside each stock and aggregate stock totals
 
 
 ## Participation reminder roles
-/setup → Uczestnicy wojny selects up to ten guild roles (union, excluding bots; empty disables attendance lists). Daily and weekly reminders include separate red-icon weekly non-enrollment and clock-icon enrolled-but-not-updated lists. Daily cutoff is 02:00 Europe/Warsaw, not midnight. Member roster is fetched live through paginated Discord REST with Server Members Intent enabled in Developer Portal. Costs-only changes do not refresh resource timestamps. Mentions never ping; lists split into bounded messages with per-part nonces. API failures produce an explicit unavailable notice, never a false empty list. Settings persist independently of resource resets.
+/setup → Uczestnicy wojny selects up to ten guild roles (union, excluding bots; empty disables attendance lists). Daily and weekly reminders include separate red-icon weekly non-enrollment and clock-icon enrolled-but-not-updated lists. Daily cutoff is 00:00 UTC (01:00 winter / 02:00 summer in Poland). Member roster is fetched live through paginated Discord REST with Server Members Intent enabled in Developer Portal. Costs-only changes do not refresh resource timestamps. Mentions never ping; lists split into bounded messages with per-part nonces. API failures produce an explicit unavailable notice, never a false empty list. Settings persist independently of resource resets.
 
 The private all-reminders preview includes a ninth embed with explicitly fictional example names for both participant lists. It illustrates the attendance layout without querying members, changing resources, sending public messages or affecting delivery state.
 
@@ -147,3 +155,7 @@ Enrollment summaries identify additional enrolled users outside participant role
 Guild participation data always comes from the guild-wide member endpoint, never the invoking channel. Roster requests share an in-flight/30-second cache scoped to guild, token and request client, with no failed-result caching, an eight-second overall fetch budget and bounded pagination. Read-only reports ready within one second return directly through the initial private interaction callback; slower reports acknowledge privately and complete afterward. This avoids unnecessary webhook edits while preserving timely acknowledgments and retry deduplication.
 
 Resource report continuation titles are “Zasoby klanu (ciąg dalszy)”; day numbers apply only to actual daily scoring groups.
+
+## Scanner clipboard import
+
+`/import dane:<JSON>` accepts exactly five resources and two costs copied by the scanner. All values are bounded nonnegative integers (costs positive). Unknown fields, account identifiers, arrays, missing fields and malformed JSON are rejected atomically. Identity comes only from the verified Discord interaction. Replies are private and suppress mentions. Running the command confirms replacement of all seven values.

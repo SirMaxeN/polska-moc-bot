@@ -2,6 +2,7 @@ import { ScoringService } from '../domain/ScoringService.js';
 import { Navigation } from './Navigation.js';
 import { ParticipationReminders } from './ParticipationReminders.js';
 import { ReportPaginator } from './ReportPaginator.js';
+import { sortPlayers } from './PlayerOrder.js';
 
 export class ReportService {
   static weekdays = ['wtorek', 'środa', 'czwartek', 'piątek', 'sobota', 'niedziela'];
@@ -71,6 +72,23 @@ export class ReportService {
       + `\nAktualizacja zasobów: ${player.updated_at ? this.time(player.updated_at) : 'brak wpisu'}`;
   }
 
+  dayResources(player, day, tech) {
+    const rate = category => ScoringService.categories[category].days.includes(day) && day !== 6
+      ? this.scoring.rate(category, day, tech) : 0;
+    const summons = Math.floor(player.mount_keys / (player.mount_cost ?? 50));
+    return [
+      { key: 'skill_tickets', label: 'Bilety', count: player.skill_tickets, points: Math.floor(player.skill_tickets / (player.skill_cost_x5 ?? 200)) * 5 * rate('skillSummon') },
+      { key: 'mount_keys', label: 'Klucze wierzchowców (przyzwanie + łączenie nowych)', count: player.mount_keys, points: summons * (rate('mountSummon') + rate('mountMerge')) },
+      { key: 'mounts', label: 'Posiadane wierzchowce (łączenie, bez 1 bazowego)', count: player.mounts ?? 0, points: (player.mounts ?? 0) * rate('mountMerge') },
+      { key: 'hammers', label: 'Młotki', count: player.hammers, points: player.hammers * rate('forge') },
+      { key: 'pets', label: 'Zwierzaki lub jajka (bez 3 bazowych)', count: player.pets, points: player.pets * rate('petMerge') },
+    ];
+  }
+
+  dayResourceLines(rows, day) {
+    return rows.map(row => `${ReportService.emojis[row.key] ?? '🐎'} ${row.label}: **${this.number(row.count)}** → **${day === 6 ? 'Brak prognozy' : `${row.key === 'hammers' && row.points > 0 ? '≈ ' : ''}${this.number(row.points)} pkt`}**`).join('\n');
+  }
+
   rates(tech) {
     return Object.entries(ScoringService.categories).map(([key, category]) => {
       const groups = new Map();
@@ -83,6 +101,7 @@ export class ReportService {
   }
 
   render(kind, snapshot, userId, now = new Date(), requestedPage = 0) {
+    snapshot = { ...snapshot, players: sortPlayers(snapshot.players) };
     const cycle = this.calendar.cycle(now);
     const model = this.scoring.clan(snapshot.players, snapshot.tech);
     const date = `${this.time(cycle.starts[0])} : ${this.time(cycle.end)}`;
@@ -90,7 +109,29 @@ export class ReportService {
     const enrollment = ParticipationReminders.enrollmentLabel(snapshot.enrollment, snapshot.players.length);
     let template;
     let groups;
-    if (kind === 'resources') {
+    if (kind === 'selected') {
+      const day = snapshot.selectedDay;
+      const total = model.days[day - 1];
+      template = { title: `📌 Wybrani gracze: dzień ${day} (${ReportService.weekdays[day - 1]})`,
+        description: `${base}\n\nData dnia: ${this.time(cycle.starts[day - 1])}.\nPotencjał z aktualnie zapisanych zasobów, nie historyczny wynik. Wybranych graczy: **${model.members.length}**.` };
+      const resourceRows = model.members.map(member => this.dayResources(member.player, day, snapshot.tech));
+      const dungeonLine = points => day === 1 || day === 4 ? `\nLochy (założenie: 8 kluczy na gracza): **${this.number(points)} pkt**` : '';
+      const fields = model.members.map((member, index) => ({ name: this.escape(member.player.name),
+        value: `${this.dayResourceLines(resourceRows[index], day)}${dungeonLine(member.days[day - 1].categories.dungeon)}\n**Razem: ${this.score(member.days[day - 1])}**\nAktualizacja: ${this.time(member.player.updated_at)}` }));
+      const sums = (resourceRows[0] ?? []).map((row, index) => ({ ...row,
+        count: resourceRows.reduce((sum, rows) => sum + rows[index].count, 0),
+        points: resourceRows.reduce((sum, rows) => sum + rows[index].points, 0) }));
+      fields.push({ name: `Suma wybranych: dzień ${day}`, value: `${this.dayResourceLines(sums, day)}${dungeonLine(model.members.reduce((sum, member) => sum + (member.days[day - 1].categories.dungeon ?? 0), 0))}\n**Razem: ${this.score(total)}**\nNie uwzględniamy: ${ReportService.excluded[day - 1]}.` });
+      groups = [{ label: 'wybrani gracze', fields }];
+    } else if (kind === 'updated') {
+      const start = this.calendar.boundary(now.toISOString().slice(0, 10));
+      const players = snapshot.players.filter(player => Date.parse(player.updated_at) >= start.getTime() && Date.parse(player.updated_at) <= now.getTime());
+      template = { title: '✅ Dzisiejsze aktualizacje',
+        description: `Od resetu gry: ${this.time(start)}\nWygenerowano: ${this.time(now)}\nWpisali lub zaktualizowali zasoby: **${players.length}**. Zmiana samych kosztów nie liczy się jako aktualizacja.` };
+      const fields = players.length ? players.map(player => ({ name: this.escape(player.name), value: `Aktualizacja: ${this.time(player.updated_at)}` }))
+        : [{ name: 'Brak aktualizacji', value: 'Nikt jeszcze nie wpisał ani nie zaktualizował dziś zasobów.' }];
+      groups = [{ label: 'dzisiejsze aktualizacje', fields }];
+    } else if (kind === 'resources') {
       const keys = ['skill_tickets', 'mount_keys', 'mounts', 'hammers', 'pets'];
       const labels = { skill_tickets: 'Bilety', mount_keys: 'Klucze wierzchowców', mounts: 'Wierzchowce', hammers: 'Młotki', pets: 'Zwierzaki lub jajka' };
       template = { title: '🎒 Zasoby klanu', description: `Cykl: ${date}\nWygenerowano: ${this.time(now)}\n\n${enrollment}\nMaksymalne punkty za każdy zasób w najlepszym dniu, bez sumowania dni i bez lochów. Klucze: przyzwanie + połączenie nowych sztuk. Posiadane wierzchowce: tylko połączenie. Wierzchowce bez 1 bazowego; zwierzaki lub jajka bez 3 bazowych.` };
@@ -117,7 +158,7 @@ export class ReportService {
         name: this.header(cycle, day.day, now), value: `**${this.score(day)}**${this.lastChance(cycle, day.day, snapshot.players, now)}\nNie uwzględniamy: ${ReportService.excluded[day.day - 1]}.`,
       }] }));
     } else {
-      groups = model.days.map(day => {
+      groups = model.days.filter(day => !snapshot.reportDays || snapshot.reportDays.includes(day.day)).map(day => {
         const header = this.header(cycle, day.day, now);
         const fields = [];
         if (day.total === null) return { day: day.day, header, fields: [{ name: header,
@@ -141,14 +182,14 @@ export class ReportService {
         return { day: day.day, header, fields };
       });
       template = { title: kind === 'clan-ultra' ? '🔎 Ultra szczegółowy raport klanu' : '📋 Szczegółowy raport klanu',
-        description: `${base}\n\n${enrollment}` };
+        description: `${base}\n\n${enrollment}${snapshot.reportDays ? `\nWybrane dni: **${snapshot.reportDays.join(', ')}**.` : ''}` };
     }
     const pages = ReportPaginator.pack(template, groups);
     const messages = pages.map((embed, index) => ({
       content: '', embeds: [{ ...embed, footer: { text: pages.length > 1 ? `Część ${index + 1}/${pages.length} · Europe/Warsaw` : 'Europe/Warsaw' }, color: 0xc72c3b }],
       components: Navigation.all(userId),
     }));
-    if (kind !== 'player') messages.push(...ParticipationReminders.outsiderMessages(snapshot.enrollment).map(message => ({ ...message, components: Navigation.all(userId) })));
+    if (!['player', 'selected', 'updated'].includes(kind)) messages.push(...ParticipationReminders.outsiderMessages(snapshot.enrollment).map(message => ({ ...message, components: Navigation.all(userId) })));
     return { ...messages[0], ...(messages.length > 1 ? { additionalMessages: messages.slice(1) } : {}) };
   }
 }

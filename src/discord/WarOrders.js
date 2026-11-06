@@ -17,11 +17,13 @@ export class WarOrders {
     ]],
     ['🥚 Zwierzaki, jajka i lochy', [
       ['pets', 'Łączymy zwierzaki lub jajka', '🥚', 'Łączymy zwierzaki lub jajka i zdobywamy punkty wojny. Każde połączenie daje tyle samo punktów, niezależnie od rzadkości.'],
+      ['eggs-now', 'Wykluwamy teraz tylko jajka', '🪺', 'Wykluwamy teraz wyłącznie jajka. Pozostałe zasoby zachowujemy.'],
       ['keys', 'Tylko klucze do lochów', '🔑', 'Używamy wyłącznie kluczy do lochów. Pozostałe zasoby zachowujemy.'],
     ]],
-    ['📅 Przygotowania na jutro', [
-      ['research', 'Badania na jutro', '🔬', 'Planujemy zakończenie badań technologii na jutro, po zmianie dnia o 02:00.'],
-      ['eggs', 'Wykluwanie na jutro', '🪺', 'Planujemy zakończenie wykluwania jaj na jutro, po zmianie dnia o 02:00.'],
+    ['🔬 Technologie i przygotowania', [
+      ['research-now', 'Robimy teraz tylko technologie', '🔬', 'Realizujemy teraz wyłącznie badania technologii. Pozostałe zasoby zachowujemy.'],
+      ['research', 'Badania na jutro', '🔬', 'Planujemy zakończenie badań technologii na jutro, po resecie dnia gry: 01:00 zimą / 02:00 latem w Polsce.'],
+      ['eggs', 'Wykluwanie na jutro', '🪺', 'Planujemy zakończenie wykluwania jaj na jutro, po resecie dnia gry: 01:00 zimą / 02:00 latem w Polsce.'],
     ]],
     ['⚔️ Decyzje dowództwa', [
       ['fight', 'Do boju!', '⚔️', 'Ruszamy do walk w wojnie klanów!'],

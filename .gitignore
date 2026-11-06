@@ -44,7 +44,11 @@ config/release.json
 !/docs/demo/*.py
 
 # Editor and OS metadata
+/.local/
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+
+# Private files attached to Codex conversations
+.codex-remote-attachments/

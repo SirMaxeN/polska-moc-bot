@@ -1,13 +1,15 @@
 import { createServer } from 'node:http';
 import { createPublicKey, verify } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { discordMessageBody } from './DiscordMessageBody.js';
 
 export class InteractionServer {
-  constructor(publicKey, commands, applicationId) {
+  constructor(publicKey, commands, applicationId, mobile = null) {
     if (!/^[a-f\d]{64}$/i.test(publicKey ?? '')) throw new Error('DISCORD_PUBLIC_KEY must contain 64 hexadecimal characters.');
     this.key = createPublicKey({ key: Buffer.from(`302a300506032b6570032100${publicKey}`, 'hex'), format: 'der', type: 'spki' });
     this.commands = commands;
     this.applicationId = applicationId;
+    this.mobile = mobile;
     this.pending = new Map();
     try {
       const release = JSON.parse(readFileSync(new URL('../../config/release.json', import.meta.url), 'utf8')).release;
@@ -33,6 +35,7 @@ export class InteractionServer {
   async receive(request, response) {
     try {
       const path = new URL(request.url, 'http://localhost').pathname;
+      if (this.mobile && await this.mobile.receive(request, response, path, this.send.bind(this))) return;
       if (request.method === 'GET' && ['/banner.png', '/discord/banner.png', '/discord/botyslaw-smith/banner.png'].includes(path)) {
         response.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': this.banner.length, 'Cache-Control': 'public, max-age=3600', 'X-Content-Type-Options': 'nosniff' });
         return response.end(this.banner);
@@ -94,6 +97,10 @@ export class InteractionServer {
   }
 
   async prepareResult(result) {
+    if ([4,7].includes(result.type) && result.data?.files?.length) {
+      // Acknowledge once, then edit that original message with its complete attachment.
+      return { response: result.type===7 ? {type:6} : {type:5,data:{flags:64}}, complete:async()=>result.data };
+    }
     if (!result.eagerReport || !result.complete) return result;
     // Finish fast read-only reports in the callback; slow reports still acknowledge promptly.
     const work = Promise.resolve().then(() => result.complete()).then(data => ({ data }), () => ({ error: true }));
@@ -113,8 +120,7 @@ export class InteractionServer {
     const url = `https://discord.com/api/v10/webhooks/${this.applicationId}/${interaction.token}?wait=true`;
     for (let attempt = 0; attempt < 3; attempt++) {
       const result = await fetch(url, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...data, flags: 64, allowed_mentions: { parse: [] } }),
+        method: 'POST', ...discordMessageBody({ ...data, flags: 64, allowed_mentions: { parse: [] } }),
         signal: AbortSignal.timeout(10000),
       });
       if (result.ok) return;
@@ -127,7 +133,7 @@ export class InteractionServer {
 
   async followUp(interaction, data) {
     const result = await fetch(`https://discord.com/api/v10/webhooks/${this.applicationId}/${interaction.token}/messages/@original`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data), signal: AbortSignal.timeout(10000),
+      method: 'PATCH', ...discordMessageBody(data), signal: AbortSignal.timeout(10000),
     });
     if (!result.ok) throw new Error('Deferred response failed.');
   }

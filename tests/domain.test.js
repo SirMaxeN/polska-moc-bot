@@ -68,9 +68,9 @@ test('calendar follows Tuesday war, Monday reset, Sunday day six and Warsaw DST'
   assert.equal(calendar.status(calendar.cycle(sunday), 6, sunday), 'current');
   assert.equal(calendar.cycle(new Date('2026-10-18T23:59:59Z')).id, '2026-10-11');
   assert.equal(calendar.cycle(new Date('2026-10-19T00:00:00Z')).id, '2026-10-18');
-  assert.equal(calendar.boundary('2026-03-29').toISOString(), '2026-03-29T01:00:00.000Z');
+  assert.equal(calendar.boundary('2026-03-29').toISOString(), '2026-03-29T00:00:00.000Z');
   assert.equal(calendar.boundary('2026-10-25').toISOString(), '2026-10-25T00:00:00.000Z');
   const dst = new Date('2026-10-25T00:01:00Z');
   assert.equal(calendar.status(calendar.cycle(dst), 6, dst), 'current');
-  assert.equal(calendar.cycle(dst).end.toISOString(), '2026-10-26T01:00:00.000Z');
+  assert.equal(calendar.cycle(dst).end.toISOString(), '2026-10-26T00:00:00.000Z');
 });
