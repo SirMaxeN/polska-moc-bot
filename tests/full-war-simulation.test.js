@@ -45,12 +45,13 @@ test('unsupported reflect cannot carry an invented numeric probability',()=>{
  b.simulation.matrix=b.simulation.matrix.map(x=>x.ally===0?{ally:x.ally,enemy:x.enemy,error:'Nieobsługiwane odbicie'}:x);
  const p=plan(b);assert.equal(p.assignments[0].main,null);assert.match(p.assignments[0].note,/Brak pełnej oceny/);
 });
-test('recognised Tira cannot bypass the unsupported-effect guard when its bonus OCR is missing',()=>{
- const b=fixture();b.profiles.ours[0].fairy={type:'TIRA',level:3};assert.throws(()=>plan(b),/Niewiarygodny/);
- b.simulation.matrix=b.simulation.matrix.map(x=>x.ally===0?{ally:x.ally,enemy:x.enemy,error:'Tira: efekt niepotwierdzony'}:x);assert.equal(plan(b).validPairs,2);
+test('season 2026-11 Tira is simulated while reflect stays guarded',()=>{
+ const b=fixture();b.profiles.ours[0].fairy={type:'TIRA',level:3};assert.equal(plan(b).validPairs,4);
+ b.profiles.ours[0].bonuses.REFLECT=5;assert.throws(()=>plan(b),/Niewiarygodny/);
+ b.simulation.matrix=b.simulation.matrix.map(x=>x.ally===0?{ally:x.ally,enemy:x.enemy,error:'Odbicie: efekt niepotwierdzony'}:x);assert.equal(plan(b).validPairs,2);
 });
 test('invalid pair counts, duplicates, fake samples and mismatched/stale profiles are rejected',()=>{
- for(const mutate of [b=>b.simulation.matrix.pop(),b=>b.simulation.matrix[1]=b.simulation.matrix[0],b=>b.simulation.matrix[0].wins++,b=>b.simulation.matrix[0].trials=10,b=>b.profiles.ours[0].name='Someone else',b=>b.profiles.ours[0].scannedAt-=86400001,b=>b.profiles.ours[0].pets=4,b=>b.profiles.ours[0].skills[0].level=0,b=>b.profiles.ours[0].fairy={type:'UNKNOWN',level:8}]){const b=fixture();mutate(b);assert.throws(()=>plan(b));}
+ for(const mutate of [b=>b.simulation.matrix.pop(),b=>b.simulation.matrix[1]=b.simulation.matrix[0],b=>b.simulation.matrix[0].wins++,b=>b.simulation.matrix[0].trials=10,b=>b.profiles.ours[0].name='Someone else',b=>b.profiles.ours[0].scannedAt-=8*86400000+1,b=>b.profiles.ours[0].pets=4,b=>b.profiles.ours[0].skills[0].level=0,b=>b.profiles.ours[0].fairy={type:'UNKNOWN',level:8}]){const b=fixture();mutate(b);assert.throws(()=>plan(b));}
 });
 test('a fully unknown matrix cannot be saved as a combat probability report',()=>{
  const b=fixture();b.profiles.ours.fill(null);b.simulation.matrix=b.simulation.matrix.map(x=>({ally:x.ally,enemy:x.enemy,error:'Brak profilu'}));assert.throws(()=>plan(b),/Brak choć jednej/);
@@ -71,4 +72,15 @@ test('authenticated large full-profile upload survives HTTP, remains repeatable 
  const send=auth=>fetch(url,{method:'POST',headers:{'Content-Type':'application/json',authorization:`Bearer ${auth}`},body:JSON.stringify(b)});
  assert.equal((await send('bad')).status,401);assert.equal((await send(token)).status,200);assert.equal((await send(token)).status,200);
  const stored=JSON.parse(db.db.prepare('SELECT payload FROM war_lists WHERE guild_id=?').get('g').payload);assert.equal(stored.plan.type,'simulation');assert.equal(stored.plan.pairs,2500);assert.equal(stored.profiles.ours.length,50);
+});
+test('equal simulated chances send stronger allies to stronger rivals so weaker allies keep easier targets',async()=>{
+ const {planHybridWar}=await import('../src/domain/WarSimulation.js');
+ const b=fixture(3);b.ours.forEach((p,i)=>p.power=3e9-i*1e9);b.enemies.forEach((p,i)=>p.power=2.5e9-i*1e9+1);
+ b.profiles={ours:b.ours.map(p=>({...b.profiles.ours[0],...p})),enemies:b.enemies.map(p=>({...b.profiles.enemies[0],...p}))};
+ b.simulation.matrix=b.simulation.matrix.map(x=>({...x,wins:700,losses:324,draws:0}));
+ const result=planHybridWar(validateSimulation(b,b.ours,b.enemies,now),b.ours,b.enemies,b.own_bonus,b.enemy_bonus);
+ assert.deepEqual(result.assignments.map(a=>a.main),['Rywal0','Rywal1','Rywal2']);
+});
+test('incrementally reused profiles from earlier this week remain valid',()=>{
+ const b=fixture();b.profiles.ours[0].scannedAt-=6*86400000;assert.equal(plan(b).validPairs,4);
 });

@@ -1,4 +1,6 @@
 const skillTypes=new Set(['MEAT','ARROWS','SHOUT','BERSERK','SHURIKENS','CANNON_BARRAGE','BUFF','ARROW_RAIN','THORNS','MORALE','BOMB','METEORITE','STAMPEDE','WORM','LIGHTNING','HIGHER_MORALE','STRAFE_RUN','DRONE']);
+/** Profiles are reused incrementally on the phone for a week while the member's power is unchanged. */
+export const PROFILE_MAX_AGE=8*86400000;
 const nameKey=s=>s.normalize('NFKC').toLocaleLowerCase('pl');
 import { rebalanceWarAlternatives } from './WarAlternatives.js';
 /** Hungarian rectangular assignment, including dummy columns for no favourable target. */
@@ -32,7 +34,7 @@ export function validateProfiles(data,members,now) {
   if(!Array.isArray(data)||data.length!==members.length)throw new Error('Brak zapisanych profili klanu.');
   return data.map((profile,i)=>{
    if(profile===null)return null;
-   if(!profile||typeof profile.name!=='string'||nameKey(profile.name)!==nameKey(members[i].name)||![profile.damage,profile.health].every(x=>Number.isFinite(x)&&x>0&&x<=1e24)||typeof profile.ranged!=='boolean'||typeof profile.mounted!=='boolean'||!Number.isInteger(profile.pets)||profile.pets<0||profile.pets>3||!Number.isFinite(profile.scannedAt)||profile.scannedAt>now+60000||now-profile.scannedAt>86400000)throw new Error('Nieprawidłowy lub nieaktualny profil gracza.');
+   if(!profile||typeof profile.name!=='string'||nameKey(profile.name)!==nameKey(members[i].name)||![profile.damage,profile.health].every(x=>Number.isFinite(x)&&x>0&&x<=1e24)||typeof profile.ranged!=='boolean'||typeof profile.mounted!=='boolean'||!Number.isInteger(profile.pets)||profile.pets<0||profile.pets>3||!Number.isFinite(profile.scannedAt)||profile.scannedAt>now+60000||now-profile.scannedAt>PROFILE_MAX_AGE)throw new Error('Nieprawidłowy lub nieaktualny profil gracza.');
    if(profile.skillsReviewed!==true||!Array.isArray(profile.skills)||profile.skills.length>3||profile.skills.some(s=>!s||!skillTypes.has(s.type)||!Number.isInteger(s.level)||s.level<1||s.level>100)||new Set(profile.skills.map(s=>s.type)).size!==profile.skills.length)throw new Error('Niekompletne umiejętności gracza.');
    if(!profile.bonuses||typeof profile.bonuses!=='object'||Array.isArray(profile.bonuses)||Object.values(profile.bonuses).some(x=>!Number.isFinite(x)||x<0||x>100000))throw new Error('Nieprawidłowe bonusy profilu.');
    const fairy=profile.fairy;if(!fairy||(fairy.present!==false&&(!['LORA','MIRA','TIRA'].includes(fairy.type)||!Number.isInteger(fairy.level)||fairy.level<1||fairy.level>20)))throw new Error('Niekompletne dane wróżki.');
@@ -41,7 +43,8 @@ export function validateProfiles(data,members,now) {
   });
 }
 export function checkCombatResult(x,first,second) {
- const unsupported=[first,second].some(p=>p&&((p.bonuses.REFLECT??0)>0||(p.fairy.type==='TIRA'&&p.fairy.present!==false)));
+ // Season 2026-11 Tira adds damage already included in the displayed profile; reflect remains unmodelled.
+ const unsupported=[first,second].some(p=>p&&(p.bonuses.REFLECT??0)>0);
  if(x.error!=null) {
   if(typeof x.error!=='string'||!x.error.trim()||x.error.length>1000||['wins','losses','draws','trials'].some(k=>x[k]!=null))throw new Error('Nieprawidłowy brak wyniku pary.');
   return {error:x.error};
