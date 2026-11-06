@@ -4,6 +4,8 @@ import { planHybridWar } from '../domain/WarSimulation.js';
 export class WarReport {
  /** Strip markdown/mentions; square brackets (clan tags like PolskaMoc[PL]) stay visible but escaped. */
  static clean(value) { return String(value).replace(/[\\`*_~|<>@#]/g,'').replace(/[\u0000-\u001f\u007f]/g,' ').trim().replace(/[[\]]/g,m=>'\\'+m); }
+ /** For embed titles, which Discord does not render as markdown: same stripping, brackets left as they are. */
+ static plain(value) { return String(value).replace(/[\\`*_~|<>@#]/g,'').replace(/[\u0000-\u001f\u007f]/g,' ').trim(); }
  static number(value, digits=2) { return new Intl.NumberFormat('pl-PL',{maximumFractionDigits:digits}).format(value); }
  static power(value) {
   for(const [unit,size] of [['t',1e12],['b',1e9],['m',1e6],['k',1e3]])if(value>=size)return `${this.number(value/size)}${unit}`;
@@ -42,14 +44,15 @@ export class WarReport {
    if(!a.main)return `🔴 **${clean(a.name)}** → brak wolnego przeciwnika`;
    const main=odds(a,a.main);
    const marker=a.shared?'🟠':main.source==='power'?'⚖️':main.good?'🟢':'🟡';
-   const alts=a.alternatives.map(name=>`${clean(name)} ${odds(a,name).text}`).join(', ');
+   // Alternatives stay short: the name, plus the chance only when a simulation exists (never power).
+   const alts=a.alternatives.map(name=>{const o=odds(a,name);return o.source==='sim'?`${clean(name)} ${o.text}`:clean(name);}).join(', ');
    return `${marker} **${clean(a.name)}** → **${clean(a.main)}** (${main.text})${alts?` · alt: ${alts}`:''}`;
   });
   const counts=marker=>lines.filter(x=>x.startsWith(marker)).length;
   const legend=[
    testMode?'🧪 **Poza niedzielą** — rywal ma takie same bonusy jak my. W niedzielę aplikacja odczyta prawdziwe bonusy rywala.':`Wojna ${clean(row.war_day)}.`,
    `**${clean(p.own_clan??'Nasz klan')}** (${p.ours.length}) vs **${clean(p.enemy_clan??'Rywal')}** (${p.enemies.length})`,
-   'Format: **gracz** → **przeciwnik** (szansa wygranej) · alt: zapasowe cele z szansą.',
+   'Format: **gracz** → **przeciwnik** (szansa wygranej) · alt: zapasowe cele (z szansą, jeśli jest symulacja).',
    `🟢 przewaga w symulacji (${counts('🟢')}) · 🟡 szansa ≤50% (${counts('🟡')}) · ⚖️ dobór wg mocy, brak pełnych danych (${counts('⚖️')})${counts('🟠')?` · 🟠 wspólny cel (${counts('🟠')})`:''}${counts('🔴')?` · 🔴 bez celu (${counts('🔴')})`:''}`,
    simulated?`Szanse to wynik modelu walki, nie gwarancja. Profile: ${plan.completeOurs}/${p.ours.length} + ${plan.completeEnemies}/${p.enemies.length}.`:'Brak symulacji — dobór wyłącznie według mocy z bonusami.',
   ].join('\n');

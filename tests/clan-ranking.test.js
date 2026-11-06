@@ -35,14 +35,14 @@ test('ranking rejects an incomplete or duplicated pair matrix',()=>{
  assert.throws(()=>clanRanking(d,d.members,now),/Powtórzona/);
 });
 
-test('saved ranking renders a private report with attachment and never mentions',t=>{
+test('saved ranking renders a private report with wins out of all opponents and never mentions',t=>{
  const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());
  const rankings=new ClanRankings(db,()=>now);
  assert.match(rankings.report('g').content,/nie został jeszcze obliczony/);
  assert.equal(rankings.save({guild_id:'g'},body(4)).status,'saved');
  const view=rankings.report('g');
  assert.deepEqual(view.allowed_mentions,{parse:[]});
- assert.match(view.embeds[0].description,/1\. Gracz0/);
+ assert.match(view.embeds[0].description,/1\. 🥇 \*\*Gracz0\*\* · .* · wygrane \*\*[\d,]+\/3\*\*/);assert.match(view.embeds[0].description,/Każdy z każdym/);
  assert.equal(view.files,undefined);assert.match(view.embeds.map(e=>e.description).join('\n'),/Gracz2/);
 });
 

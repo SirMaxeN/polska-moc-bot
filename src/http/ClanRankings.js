@@ -22,13 +22,28 @@ export class ClanRankings {
   const allowed_mentions={parse:[]};
   if(!saved)return {content:'Ranking klanu nie został jeszcze obliczony. Uruchom „Ranking klanu” w aplikacji.',allowed_mentions};
   const {clan,rows}=JSON.parse(saved.payload);
-  const lines=rows.map((p,i)=>`${i+1}. ${WarReport.clean(p.name)} · ${WarReport.power(p.power)} · ${WarReport.number(p.points,2)} pkt · ${p.simulated} sym. / ${p.byPower} wg mocy`);
+  const opponents=Math.max(0,rows.length-1);
+  // Players without a complete profile are ranked by power only; everyone else's few power-only pairs are those games.
+  const powerOnly=rows.filter(p=>p.simulated===0&&p.byPower>0);
+  const medal=['🥇','🥈','🥉'];
+  const lines=rows.map((p,i)=>{
+   const share=opponents?Math.round(p.points/opponents*100):0;
+   const wins=`${WarReport.number(p.points,1)}/${opponents}`;
+   const place=`${i+1}.${medal[i]?' '+medal[i]:''}`;
+   return powerOnly.includes(p)
+    ?`${place} ${WarReport.clean(p.name)} · ${WarReport.power(p.power)} · ⚖️ ok. ${wins} (tylko wg mocy)`
+    :`${place} **${WarReport.clean(p.name)}** · ${WarReport.power(p.power)} · wygrane **${wins}** (${share}%)`;
+  });
   const pairs=rows.length*(rows.length-1)/2;
   const simulated=rows.reduce((n,p)=>n+p.simulated,0)/2;
-  const date=new Date(saved.observed_at).toISOString();
-  const method='Każdy walczy z każdym bez bonusów wojennych. Wygrana daje 1 pkt, remis ½ pkt. Brak wyniku zastępuje porównanie mocy.';
+  const method=[
+   `⚔️ **Każdy z każdym:** każdy gracz stoczył symulowaną walkę z każdym z pozostałych ${opponents} (bez bonusów wojennych).`,
+   `**Wygrane X/${opponents}** = ile z tych walk wygrywa według modelu (remis liczy się jako ½). Wyżej = mocniejszy w bezpośrednim starciu.`,
+   'Moc z gry jest tylko informacyjna — kolejność wynika z walk, nie z mocy. To szacunek eksperymentalnego modelu.',
+   powerOnly.length?`⚖️ Bez pełnego profilu (oceniani tylko wg mocy): ${powerOnly.map(p=>WarReport.clean(p.name)).join(', ')}.`:'',
+  ].filter(Boolean).join('\n');
   // Every player is listed; lines are packed into embeds within Discord's 4096/6000 character limits.
-  const header=`${method}\n**${rows.length} graczy** · ${simulated}/${pairs} par z symulacji · <t:${Math.floor(saved.observed_at/1000)}:R>\n\n`;
+  const header=`${method}\n**${rows.length} graczy** · ${simulated}/${pairs} walk z symulacji · <t:${Math.floor(saved.observed_at/1000)}:R>\n\n`;
   const embeds=[];let current=header,total=0;
   for(const line of lines) {
    if(current.length+line.length+1>4000){embeds.push(current);total+=current.length;current='';}
@@ -36,6 +51,6 @@ export class ClanRankings {
   }
   embeds.push(current);
   return {allowed_mentions,
-   embeds:embeds.map((description,i)=>({...(i===0?{title:`🏆 Ranking klanu · ${WarReport.clean(clan)}`}:{}),color:0x61d6ac,description}))};
+   embeds:embeds.map((description,i)=>({...(i===0?{title:`🏆 Ranking klanu · ${WarReport.plain(clan)}`}:{}),color:0x61d6ac,description}))};
  }
 }
