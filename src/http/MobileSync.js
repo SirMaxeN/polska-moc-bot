@@ -140,7 +140,7 @@ export class MobileSync {
       catch { throw new MobileError(400, 'Invalid JSON'); }
       if (!body || typeof body !== 'object' || Array.isArray(body)) throw new MobileError(400, 'Invalid JSON object');
       let result;
-      if(match[1].startsWith('war-')) {const device=this.authenticate(request.headers.authorization);try {result=match[1]==='war-status'?this.warLists.status(device):this.warLists.save(device,body,match[1]==='war-test');}catch(e){throw new MobileError(409,e.message);}}
+      if(match[1].startsWith('war-')) {const device=this.authenticate(request.headers.authorization);try {result=match[1]==='war-status'?{...this.warLists.status(device),...this.clanRankings.status(device.guild_id)}:this.warLists.save(device,body,match[1]==='war-test');}catch(e){throw new MobileError(409,e.message);}}
       else if(match[1]==='clan-ranking') {const device=this.authenticate(request.headers.authorization);try {result=this.clanRankings.save(device,body);}catch(e){throw new MobileError(409,e.message);}}
       else result = match[1] === 'pair' ? this.pair(body) : this.update(request.headers.authorization, body);
       send(response, 200, result);

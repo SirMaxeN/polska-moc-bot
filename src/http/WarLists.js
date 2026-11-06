@@ -4,7 +4,17 @@ import { battleWindow,matchWar,validateRoster } from '../domain/WarPreparation.j
 export class WarLists {
  constructor(database,clock=()=>Date.now()) {this.database=database;this.clock=clock;database.db.exec('CREATE TABLE IF NOT EXISTS war_lists(guild_id TEXT NOT NULL,war_day TEXT NOT NULL,request_id TEXT NOT NULL,author TEXT NOT NULL,created_at TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(guild_id,war_day))');}
  current(device,testMode=false) {const day=testMode?"TEST":battleWindow(new Date(this.clock()));if(!day) throw new Error('Lista wojenna dostępna od niedzieli 01:00 do poniedziałku 01:00 (Polska).');return {day,row:this.database.db.prepare('SELECT * FROM war_lists WHERE guild_id=? AND war_day=?').get(device.guild_id,day)};}
- status(device) {const {day,row}=this.current(device);return {war_day:day,locked:!!row,reason:row?'Lista na tę wojnę została już utworzona. Nie nadpisujemy jej.':null};}
+ /** What the app shows before a scan: is the Sunday list already taken, and when was the visible list last saved. */
+ status(device) {
+  const find=day=>this.database.db.prepare('SELECT war_day,created_at FROM war_lists WHERE guild_id=? AND war_day=?').get(device.guild_id,day);
+  const day=battleWindow(new Date(this.clock()))??null;
+  const real=day?find(day):null;
+  const calendar=this.database.calendar;
+  const weekStart=calendar?calendar.boundary(calendar.cycle(new Date(this.clock())).monday).getTime():-Infinity;
+  const preview=find('TEST');
+  const shown=real??(preview&&Date.parse(preview.created_at)>=weekStart?preview:null);
+  return {war_day:day,locked:!!real,reason:real?'Lista na tę wojnę została już utworzona. Nie nadpisujemy jej.':null,list_updated_at:shown?.created_at??null,list_sunday:!!real};
+ }
  save(device,body,testMode=false) {
   const {day}=this.current(device,testMode);
   if(testMode)body={...body,war_day:day,enemy_bonus:body?.own_bonus,test_mode:true};

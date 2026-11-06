@@ -17,6 +17,10 @@ export class ClanRankings {
   this.db.prepare('INSERT INTO clan_rankings VALUES(?,?,?,?) ON CONFLICT(guild_id) DO UPDATE SET observed_at=excluded.observed_at,request_id=excluded.request_id,payload=excluded.payload WHERE excluded.observed_at>=clan_rankings.observed_at').run(device.guild_id,observed,body.request_id,JSON.stringify({clan:body.clan,rows}));
   return {status:'saved'};
  }
+ status(guildId) {
+  const saved=this.db.prepare('SELECT observed_at,payload FROM clan_rankings WHERE guild_id=?').get(guildId);
+  return {ranking_updated_at:saved?new Date(saved.observed_at).toISOString():null,ranking_members:saved?JSON.parse(saved.payload).rows?.length??0:0};
+ }
  report(guildId) {
   const saved=this.db.prepare('SELECT observed_at,payload FROM clan_rankings WHERE guild_id=?').get(guildId);
   const allowed_mentions={parse:[]};

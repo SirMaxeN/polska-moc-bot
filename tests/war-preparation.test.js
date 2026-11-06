@@ -168,3 +168,15 @@ test('preview war list disappears with the weekly reset and the start menu offer
  now=Date.parse('2026-11-09T00:01:00Z');assert.match(lists.report('g','u',new Date(now)).content,/Nie utworzono/);
  assert.ok(Navigation.reports('u').flatMap(r=>r.components).some(b=>b.custom_id==='report:u:clan-ranking:0'));
 });
+
+test('war status works outside Sunday and reports when the visible list was saved',t=>{
+ const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());
+ let now=Date.parse('2026-11-06T12:00:00Z');const lists=new WarLists(db,()=>now);const device={guild_id:'g',user_id:'u'};
+ assert.deepEqual(lists.status(device),{war_day:null,locked:false,reason:null,list_updated_at:null,list_sunday:false});
+ lists.save(device,{request_id:randomUUID(),observed_at:new Date(now).toISOString(),ours:[{name:'ally',power:100}],enemies:[{name:'enemy',power:90}],our_count:1,enemy_count:1,own_bonus:{damage:0,health:0}},true);
+ assert.equal(lists.status(device).list_updated_at,new Date(now).toISOString());
+ now=Date.parse('2026-11-08T12:00:00Z');
+ assert.equal(lists.status(device).locked,false);
+ lists.save(device,{request_id:randomUUID(),war_day:'2026-11-08',observed_at:new Date(now).toISOString(),ours:[{name:'ally',power:100}],enemies:[{name:'enemy',power:90}],our_count:1,enemy_count:1,own_bonus:{damage:0,health:0},enemy_bonus:{damage:0,health:0}});
+ const s=lists.status(device);assert.equal(s.locked,true);assert.equal(s.list_sunday,true);assert.equal(s.list_updated_at,new Date(now).toISOString());
+});
