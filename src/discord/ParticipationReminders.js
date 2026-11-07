@@ -1,4 +1,5 @@
 import { compareNames } from './PlayerOrder.js';
+import { Ascension } from '../domain/Ascension.js';
 
 export class ParticipationReminders {
   static rosterCaches = new WeakMap();
@@ -41,6 +42,26 @@ export class ParticipationReminders {
       after = next;
     }
     throw new Error('Member list exceeded safe pagination limit');
+  }
+
+  async guildRoles(guildId) {
+    const response = await this.request(`https://discord.com/api/v10/guilds/${guildId}/roles`, {
+      headers: { Authorization: `Bot ${this.token}` }, signal: AbortSignal.timeout(8000), redirect: 'error',
+    });
+    if (!response.ok) throw new Error(`Role list unavailable: HTTP ${response.status}`);
+    const roles = await response.json();
+    if (!Array.isArray(roles) || roles.some(role => !/^\d{17,20}$/.test(role.id ?? ''))) throw new Error('Invalid role list');
+    return roles;
+  }
+
+  /** userId → ascension types for this guild (configured roles, or roles named "Wzniesienie: …"). */
+  async ascensions(guildId) {
+    const [roles, members] = await Promise.all([this.guildRoles(guildId), this.members(guildId)]);
+    return Ascension.members(roles, members, this.database.ascensionRoles(guildId));
+  }
+
+  static withAscensions(snapshot, map) {
+    return { ...snapshot, players: snapshot.players.map(player => ({ ...player, ascension: map.get(player.user_id) ?? [] })) };
   }
 
   static displayName(member, fallback) {

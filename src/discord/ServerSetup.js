@@ -1,6 +1,9 @@
 import { Navigation } from './Navigation.js';
 import { DailyReminders } from './DailyReminders.js';
 import { WeeklyReminders } from './WeeklyReminders.js';
+import { Ascension } from '../domain/Ascension.js';
+
+const ResourceLabels = { hammers: 'młotki', pets: 'zwierzaki/jajka', mount_keys: 'klucze', mounts: 'wierzchowce', skill_tickets: 'bilety' };
 
 export class ServerSetup {
   static managementPanel(userId, guildId, database, notice = '') {
@@ -14,6 +17,14 @@ export class ServerSetup {
     const saved = database.participationRoles(guildId);
     return { content: `${notice}\n**👥 Uczestnicy wojny**\nWybierz role osób, które powinny wpisywać zasoby. Wystarczy jedna z wybranych ról. Boty są pomijane. Przypomnienia pokażą osoby bez wpisu w tym tygodniu i osobno zapisanych bez aktualizacji od ostatniego resetu dnia gry. Wyczyszczenie wyboru wyłącza listy.\nW Discord Developer Portal musi być włączone Server Members Intent.`, embeds: [],
       components: [{ type: 1, components: [{ type: 6, custom_id: `setup:${userId}:save-participants`, min_values: 0, max_values: 10, placeholder: 'Role uczestników', ...(saved.length ? { default_values: saved.map(id => ({ id, type: 'role' })) } : {}) }] }, this.back(userId)] };
+  }
+  static ascensionPanel(userId, guildId, database, notice = '') {
+    const saved = database.ascensionRoles(guildId);
+    return { content: `${notice ? `${notice}\n\n` : ''}**${Ascension.emoji} Wzniesienia**\nDla każdego wzniesienia wybierz rolę, którą nadajecie graczom w trakcie wzniesienia. Zasoby takich graczy pokazujemy z ${Ascension.emoji}, a ich punkty liczymy osobno („+ ${Ascension.emoji} … pkt ze wzniesienia”), bo mogą zostać zużyte na wzniesienie.\n`
+      + Object.entries(Ascension.types).map(([type, item]) => `• **${item.label}** (${item.resources.map(key => ResourceLabels[key]).join(', ')}): ${saved[type]?.length ? saved[type].map(id => `<@&${id}>`).join(', ') : `nie wybrano · rozpoznaję rolę o nazwie „${item.role}”`}`).join('\n')
+      + '\nWyczyszczenie wyboru przywraca rozpoznawanie po nazwie roli.',
+    embeds: [], components: [...Object.entries(Ascension.types).map(([type, item]) => ({ type: 1, components: [{ type: 6, custom_id: `setup:${userId}:save-ascension-${type}`, min_values: 0, max_values: 5,
+      placeholder: `Wzniesienie: ${item.label}`, ...(saved[type]?.length ? { default_values: saved[type].map(id => ({ id, type: 'role' })) } : {}) }] })), this.back(userId)] };
   }
   static preview() {
     const days = Array.from({ length: 7 }, (_, i) => DailyReminders.message(`2026-10-${19 + i}`));
@@ -40,6 +51,7 @@ export class ServerSetup {
     return { content: '**⚙️ Ustawienia serwera**\nDostępne dla administratorów i wskazanych ról zarządu.\n\n'
       + `**👑 Role zarządu:** ${database.managementRoles(guildId).length ? database.managementRoles(guildId).map(id => `<@&${id}>`).join(', ') : 'tylko administratorzy'}\n\n`
       + `**👥 Role uczestników:** ${database.participationRoles(guildId).map(id => `<@&${id}>`).join(', ') || 'listy wyłączone'}\n\n`
+      + `**${Ascension.emoji} Wzniesienia:** ${Object.entries(Ascension.types).map(([type, item]) => `${item.label}: ${database.ascensionRoles(guildId)[type]?.map(id => `<@&${id}>`).join(', ') || 'po nazwie roli'}`).join(' · ')}\n\n`
       + `**🔔 Kanał przypomnień:** ${channel ? `<#${channel}>` : 'wyłączone'}\n`
       + '**Codziennie:** 20:00, czas polski.\n'
       + `**Następne codzienne:** ${channel ? format(DailyReminders.next(now, database.calendar)) : 'wyłączone: wybierz kanał'}\n`
@@ -54,6 +66,7 @@ export class ServerSetup {
       ['channel', 'Kanał przypomnień', '🔔'], ['roles', 'Dostęp do /ping', '🛡️'], ['target', 'Odbiorca pingów', '📣'], ['management', 'Role zarządu', '👑'], ['participants', 'Uczestnicy wojny', '👥'],
     ].map(([action, label, name]) => ({ type: 2, style: 2, label, emoji: { name }, custom_id: `setup:${userId}:${action}` })) },
     { type: 1, components: [...this.back(userId, true).components,
+      { type: 2, style: 2, label: 'Wzniesienia', emoji: { name: Ascension.emoji }, custom_id: `setup:${userId}:ascension` },
       { type: 2, style: 2, label: 'Brakujące aktualizacje', emoji: { name: '📋' }, custom_id: `setup:${userId}:missing` },
       { type: 2, style: 2, label: 'Podgląd wszystkich przypomnień', emoji: { name: '🧪' }, custom_id: `setup:${userId}:preview` },
     ] }] };

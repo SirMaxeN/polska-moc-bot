@@ -27,6 +27,7 @@ export class Database {
         PRIMARY KEY(guild_id,kind,event_id));
       CREATE TABLE IF NOT EXISTS ping_settings (guild_id TEXT PRIMARY KEY, roles TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS participation_settings (guild_id TEXT PRIMARY KEY, roles TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS ascension_settings (guild_id TEXT NOT NULL, type TEXT NOT NULL, roles TEXT NOT NULL, PRIMARY KEY(guild_id, type));
       CREATE TABLE IF NOT EXISTS management_settings (guild_id TEXT PRIMARY KEY, roles TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS ping_events (guild_id TEXT PRIMARY KEY, sent_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS ping_targets (guild_id TEXT PRIMARY KEY, kind TEXT NOT NULL, role_id TEXT);
@@ -240,6 +241,18 @@ export class Database {
   setParticipationRoles(guildId, roles) {
     if (!Array.isArray(roles) || roles.length > 10 || roles.some(id => typeof id !== 'string' || !/^\d{17,20}$/.test(id) || id === guildId)) throw new UserInputError('Wybierz role uczestników, bez @everyone.');
     this.db.prepare('INSERT INTO participation_settings VALUES(?,?) ON CONFLICT(guild_id) DO UPDATE SET roles=excluded.roles').run(guildId, JSON.stringify([...new Set(roles)]));
+  }
+
+  /** { forge: [roleId], pets: [...], ... } chosen in /setup → Wzniesienia. */
+  ascensionRoles(guildId) {
+    return Object.fromEntries(this.db.prepare('SELECT type, roles FROM ascension_settings WHERE guild_id=?').all(guildId).map(row => [row.type, JSON.parse(row.roles)]));
+  }
+
+  setAscensionRoles(guildId, type, roles) {
+    if (!['forge', 'pets', 'mounts', 'skills'].includes(type)) throw new UserInputError('Nieznany rodzaj wzniesienia.');
+    if (!Array.isArray(roles) || roles.length > 5 || roles.some(id => typeof id !== 'string' || !/^\d{17,20}$/.test(id) || id === guildId)) throw new UserInputError('Wybierz role wzniesienia, bez @everyone.');
+    if (!roles.length) this.db.prepare('DELETE FROM ascension_settings WHERE guild_id=? AND type=?').run(guildId, type);
+    else this.db.prepare('INSERT INTO ascension_settings VALUES(?,?,?) ON CONFLICT(guild_id, type) DO UPDATE SET roles=excluded.roles').run(guildId, type, JSON.stringify([...new Set(roles)]));
   }
 
   managementRoles(guildId) {

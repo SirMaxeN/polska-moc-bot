@@ -29,12 +29,22 @@ export class CommandService {
     return this.reply(data, type);
   }
   reportReply(kind, snapshot, userId, now, type = 4, guildId) {
-    if (!['player', 'selected', 'updated'].includes(kind) && guildId && this.database.participationRoles(guildId).length) {
+    const enroll = !['player', 'selected', 'updated'].includes(kind) && guildId && this.database.participationRoles(guildId).length;
+    // Ascension roles live on Discord, so reports with points read them when the bot token is available.
+    const token = guildId && kind !== 'updated' ? WeeklyReminders.tokenFromEnvironment() : '';
+    if (enroll || token) {
       return { eagerReport: true, response: { type: 5, data: { flags: 64 } }, complete: async () => {
+        const discord = new ParticipationReminders(this.database, token || WeeklyReminders.tokenFromEnvironment());
+        let view = snapshot;
+        if (token) {
+          try { view = ParticipationReminders.withAscensions(snapshot, await discord.ascensions(guildId)); }
+          catch (error) { console.error('Ascension roles unavailable:', error.message); }
+        }
+        if (!enroll) return this.reports.render(kind, view, userId, now);
         let enrollment;
-        try { enrollment = await new ParticipationReminders(this.database, WeeklyReminders.tokenFromEnvironment()).enrollment(guildId, snapshot.players); }
+        try { enrollment = await discord.enrollment(guildId, snapshot.players); }
         catch { enrollment = { unavailable: true }; }
-        return this.reports.render(kind, { ...snapshot, enrollment }, userId, now);
+        return this.reports.render(kind, { ...view, enrollment }, userId, now);
       } };
     }
     const { additionalMessages = [], ...first } = this.reports.render(kind, snapshot, userId, now);
@@ -190,6 +200,11 @@ export class CommandService {
           if (action === 'save-participants') {
             this.database.setParticipationRoles(guildId, interaction.data.values);
             return this.reply(ServerSetup.participationPanel(userId, guildId, this.database, 'Zapisano role uczestników.'), 7);
+          }
+          if (action === 'ascension') return this.reply(ServerSetup.ascensionPanel(userId, guildId, this.database), 7);
+          if (action.startsWith('save-ascension-')) {
+            this.database.setAscensionRoles(guildId, action.slice('save-ascension-'.length), interaction.data.values);
+            return this.reply(ServerSetup.ascensionPanel(userId, guildId, this.database, 'Zapisano role wzniesienia.'), 7);
           }
           if (action === 'management') return this.reply(ServerSetup.managementPanel(userId, guildId, this.database), 7);
           if (action === 'save-management') {

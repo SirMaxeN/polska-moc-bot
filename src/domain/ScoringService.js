@@ -1,4 +1,5 @@
 import { UserInputError } from './UserInputError.js';
+import { Ascension } from './Ascension.js';
 
 export class ScoringService {
   static categories = {
@@ -21,15 +22,19 @@ export class ScoringService {
       mountMerge: Math.floor(player.mount_keys / (player.mount_cost ?? 50)) + (player.mounts ?? 0),
       forge: player.hammers, petMerge: player.pets, dungeon: 8,
     };
+    // Points from resources reserved for an ascension are kept apart from the available total.
+    const reserved = Ascension.categories(player.ascension);
     return Array.from({ length: 6 }, (_, index) => {
       const day = index + 1;
-      if (day === 6) return { day, total: null, categories: {}, approximate: false };
+      if (day === 6) return { day, total: null, ascension: 0, ascensionCategories: [], categories: {}, approximate: false };
       const categories = Object.fromEntries(Object.entries(ScoringService.categories)
         .filter(([, category]) => category.days.includes(day))
         .map(([id]) => [id, counts[id] * this.rate(id, day, tech)]));
-      const total = Object.values(categories).reduce((sum, value) => sum + value, 0);
-      if (!Number.isSafeInteger(total)) throw new UserInputError('Zasoby są zbyt duże, aby bezpiecznie obliczyć wynik.');
-      return { day, total, categories, approximate: 'forge' in categories && player.hammers > 0 };
+      const total = Object.entries(categories).reduce((sum, [id, value]) => sum + (reserved.has(id) ? 0 : value), 0);
+      const ascension = Object.entries(categories).reduce((sum, [id, value]) => sum + (reserved.has(id) ? value : 0), 0);
+      if (!Number.isSafeInteger(total + ascension)) throw new UserInputError('Zasoby są zbyt duże, aby bezpiecznie obliczyć wynik.');
+      return { day, total, ascension, ascensionCategories: Object.keys(categories).filter(id => reserved.has(id)),
+        categories, approximate: 'forge' in categories && player.hammers > 0 };
     });
   }
 
@@ -38,9 +43,10 @@ export class ScoringService {
     const days = Array.from({ length: 6 }, (_, i) => ({
       day: i + 1,
       total: i === 5 ? null : members.reduce((sum, member) => sum + member.days[i].total, 0),
+      ascension: i === 5 ? 0 : members.reduce((sum, member) => sum + member.days[i].ascension, 0),
       approximate: members.some(member => member.days[i].approximate),
     }));
-    if (days.some(day => day.total !== null && !Number.isSafeInteger(day.total))) throw new UserInputError('Suma klanu jest zbyt duża.');
+    if (days.some(day => day.total !== null && !Number.isSafeInteger(day.total + day.ascension))) throw new UserInputError('Suma klanu jest zbyt duża.');
     return { members, days };
   }
 }

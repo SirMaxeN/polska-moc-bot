@@ -37,7 +37,7 @@ export class WarLists {
    if(old && !testMode) {if(old.request_id===body.request_id)return {status:'saved',war_day:day};throw new Error('Lista na tę wojnę już istnieje. Zapis został zablokowany.');}
    if(testMode)this.database.db.prepare('DELETE FROM war_lists WHERE guild_id=? AND war_day=?').run(device.guild_id,day);
    this.database.db.prepare('INSERT INTO war_lists VALUES(?,?,?,?,?,?)').run(device.guild_id,day,body.request_id,device.user_id,new Date(this.clock()).toISOString(),JSON.stringify({...body,plan}));
-   return {status:'saved',war_day:day};
+   return {status:'saved',war_day:day,created:true};
   });
  }
  /** One war list: the locked Sunday list during the war window, otherwise the latest repeatable list with equal bonuses. */

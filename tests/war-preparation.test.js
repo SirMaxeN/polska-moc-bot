@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { battleWindow,matchWar } from '../src/domain/WarPreparation.js';
 import { Database } from '../src/storage/Database.js';
 import { WarCalendar } from '../src/domain/WarCalendar.js';
+import { WarAnnouncement } from '../src/discord/WarAnnouncement.js';
 import { WarLists } from '../src/http/WarLists.js';
 import { MobileSync } from '../src/http/MobileSync.js';
 import { ScoringService } from '../src/domain/ScoringService.js';
@@ -59,9 +60,11 @@ test('fifty long unmatchable names remain within Discord message limits',t=>{
 });
 test('paired-phone HTTP status and upload are authenticated and shared lock survives another member',async t=>{
  const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());const now=Date.parse('2026-11-01T12:00:00Z');
- const mobile=new MobileSync(db,new ScoringService(),{clock:()=>now});
+ const announced=[];
+ const mobile=new MobileSync(db,new ScoringService(),{clock:()=>now,announcer:{send:async(guild,day)=>announced.push([guild,day])}});
  const token=mobile.pair({code:mobile.code('g','u','Player')}).token;
  const token2=mobile.pair({code:mobile.code('g','u2','Player2')}).token;
+ t.after(()=>assert.deepEqual(announced,[['g','2026-11-01']],'only the first Sunday list is announced'));
  const server=createServer(async(req,res)=>{await mobile.receive(req,res,req.url,(res,status,data)=>{res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(data));});});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
  const send=(path,body,auth=token)=>fetch(`http://127.0.0.1:${server.address().port}/mobile/${path}`,{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${auth}`},body:JSON.stringify(body)});
@@ -179,4 +182,21 @@ test('war status works outside Sunday and reports when the visible list was save
  assert.equal(lists.status(device).locked,false);
  lists.save(device,{request_id:randomUUID(),war_day:'2026-11-08',observed_at:new Date(now).toISOString(),ours:[{name:'ally',power:100}],enemies:[{name:'enemy',power:90}],our_count:1,enemy_count:1,own_bonus:{damage:0,health:0},enemy_bonus:{damage:0,health:0}});
  const s=lists.status(device);assert.equal(s.locked,true);assert.equal(s.list_sunday,true);assert.equal(s.list_updated_at,new Date(now).toISOString());
+});
+
+test('Sunday war list announcement pings @everyone once on the reminder channel with how to open it',async t=>{
+ const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());
+ const calls=[];const request=async(url,options)=>{calls.push([url,JSON.parse(options.body)]);return {ok:true,json:async()=>({id:'123456789012345678'})};};
+ const announcer=new WarAnnouncement(db,'token',{request,logger:{error(){}}});
+ assert.equal(await announcer.send('900000000000000000','2026-11-08'),false,'no channel configured: nothing is sent');
+ db.setReminderChannel('900000000000000000','800000000000000000');
+ assert.equal(await announcer.send('900000000000000000','2026-11-08'),true);
+ const [url,body]=calls[0];
+ assert.match(url,/channels\/800000000000000000\/messages$/);
+ assert.match(body.content,/^@everyone\n/);
+ assert.match(body.content,/każdy ma przypisanego przeciwnika/);
+ assert.match(body.content,/\/start → Lista wojenna.*\/report war-list/);
+ assert.deepEqual(body.allowed_mentions,{parse:['everyone']});
+ assert.equal(body.nonce.length,24);
+ assert.equal(await new WarAnnouncement(db,'',{request}).send('900000000000000000','2026-11-08'),false,'no token: nothing is sent');
 });
