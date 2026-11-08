@@ -7,6 +7,7 @@ import { InteractionServer } from './src/http/InteractionServer.js';
 import { WeeklyReminders } from './src/discord/WeeklyReminders.js';
 import { MobileSync } from './src/http/MobileSync.js';
 import { WarAnnouncement } from './src/discord/WarAnnouncement.js';
+import { ParticipationReminders } from './src/discord/ParticipationReminders.js';
 
 // Restrict newly created database, journal and backup files to the hosting user.
 process.umask(0o077);
@@ -16,7 +17,9 @@ const database = new Database(process.env.DATABASE_PATH || './data/bot.sqlite', 
 database.checkAll();
 const reminders = new WeeklyReminders(database, { token: WeeklyReminders.tokenFromEnvironment() });
 const reports = new ReportService(calendar, scoring);
-const mobile = new MobileSync(database, scoring, { announcer: new WarAnnouncement(database, WeeklyReminders.tokenFromEnvironment()) });
+const botToken = WeeklyReminders.tokenFromEnvironment();
+const mobile = new MobileSync(database, scoring, { announcer: new WarAnnouncement(database, botToken),
+  isManager: (guildId, userId) => botToken ? new ParticipationReminders(database, botToken).isManager(guildId, userId) : Promise.resolve(false) });
 const commands = new CommandService(database, reports, scoring, mobile);
 const server = new InteractionServer(process.env.DISCORD_PUBLIC_KEY, commands, process.env.DISCORD_APPLICATION_ID || '1559328501553954925', mobile);
 const port = Number(process.env.PORT || 3000);

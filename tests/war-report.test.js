@@ -82,3 +82,4 @@ test('reports without attachments are delivered unchanged regardless of attachme
  const reply=permissions=>CommandService.prototype.warReportReply.call(context,view,{app_permissions:permissions},7);
  assert.equal(reply('0').data.files,undefined);assert.deepEqual(reply('0').data.embeds,view.embeds);
 });
+

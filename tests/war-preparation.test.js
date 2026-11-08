@@ -139,8 +139,10 @@ test('test war reports work on Tuesday, force equal bonuses, are repeatable and 
  const body={request_id:randomUUID(),observed_at:new Date(now).toISOString(),ours:[{name:'ally',power:100}],enemies:[{name:'enemy',power:90}],our_count:1,enemy_count:1,own_bonus:{damage:100,health:100},enemy_bonus:{damage:100000,health:100000}};
  lists.save(device,body,true);
  const report=lists.report(device.guild_id,'u',new Date(now),0,true);
- assert.match(reportText(report),/poza niedzielą/);assert.match(reportText(report),/ally/);
- assert.match(reportText(lists.report(device.guild_id,'u',new Date(now))),/poza niedzielą/);assert.match(reportText(report),/enemy/);
+ assert.match(reportText(report),/LISTA POGLĄDOWA BEZ TECHU/);assert.match(reportText(report),/ally/);
+ assert.match(reportText(lists.report(device.guild_id,'u',new Date(now))),/LISTA POGLĄDOWA BEZ TECHU/);assert.match(reportText(report),/enemy/);
+ assert.equal(report.content,'# ⚠️ LISTA POGLĄDOWA BEZ TECHU\n## Czekaj na update niedzielny');
+ assert.match(reportText(report),/⚙️ Tech odczytany przez aplikację: \*\*my\*\* \+100% obrażeń \/ \+100% zdrowia · \*\*rywal\*\* = nasz \(założenie\)/);
  assert.equal(report.files,undefined);assert.deepEqual(report.components,[]);
  lists.save(device,{...body,request_id:randomUUID()},true);
  const stored=JSON.parse(db.db.prepare('SELECT payload FROM war_lists WHERE guild_id=? AND war_day=?').get(device.guild_id,'TEST').payload);
@@ -175,7 +177,7 @@ test('preview war list disappears with the weekly reset and the start menu offer
 test('war status works outside Sunday and reports when the visible list was saved',t=>{
  const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());
  let now=Date.parse('2026-11-06T12:00:00Z');const lists=new WarLists(db,()=>now);const device={guild_id:'g',user_id:'u'};
- assert.deepEqual(lists.status(device),{war_day:null,locked:false,reason:null,list_updated_at:null,list_sunday:false});
+ assert.deepEqual(lists.status(device),{war_day:null,locked:false,reason:null,list_updated_at:null,list_sunday:false,can_override:false});
  lists.save(device,{request_id:randomUUID(),observed_at:new Date(now).toISOString(),ours:[{name:'ally',power:100}],enemies:[{name:'enemy',power:90}],our_count:1,enemy_count:1,own_bonus:{damage:0,health:0}},true);
  assert.equal(lists.status(device).list_updated_at,new Date(now).toISOString());
  now=Date.parse('2026-11-08T12:00:00Z');
@@ -199,4 +201,18 @@ test('Sunday war list announcement pings @everyone once on the reminder channel 
  assert.deepEqual(body.allowed_mentions,{parse:['everyone']});
  assert.equal(body.nonce.length,24);
  assert.equal(await new WarAnnouncement(db,'',{request}).send('900000000000000000','2026-11-08'),false,'no token: nothing is sent');
+});
+
+test('management may replace the Sunday list only after confirming; others stay locked',t=>{
+ const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());
+ const now=Date.parse('2026-11-08T12:00:00Z');const lists=new WarLists(db,()=>now);
+ const list=(extra={})=>({request_id:randomUUID(),war_day:'2026-11-08',observed_at:new Date(now).toISOString(),ours:[{name:'ally',power:100}],enemies:[{name:'enemy',power:90}],our_count:1,enemy_count:1,own_bonus:{damage:0,health:0},enemy_bonus:{damage:0,health:0},...extra});
+ assert.equal(lists.save({guild_id:'g',user_id:'u'},list()).created,true);
+ assert.throws(()=>lists.save({guild_id:'g',user_id:'u2'},list({overwrite:true})),/zablokowany/);
+ assert.throws(()=>lists.save({guild_id:'g',user_id:'boss',manager:true},list()),/Potwierdź aktualizację/);
+ const updated=lists.save({guild_id:'g',user_id:'boss',manager:true},list({ours:[{name:'ally',power:120}],overwrite:true}));
+ assert.equal(updated.updated,true);
+ assert.equal(lists.status({guild_id:'g',manager:true}).can_override,true);
+ assert.equal(lists.status({guild_id:'g'}).can_override,false);
+ assert.match(JSON.stringify(lists.report('g','u',new Date(now))),/120|ally/);
 });

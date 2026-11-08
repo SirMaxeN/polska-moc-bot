@@ -1,6 +1,7 @@
 const skillTypes=new Set(['MEAT','ARROWS','SHOUT','BERSERK','SHURIKENS','CANNON_BARRAGE','BUFF','ARROW_RAIN','THORNS','MORALE','BOMB','METEORITE','STAMPEDE','WORM','LIGHTNING','HIGHER_MORALE','STRAFE_RUN','DRONE']);
 /** Profiles are reused incrementally on the phone for a week while the member's power is unchanged. */
-export const PROFILE_MAX_AGE=8*86400000;
+// A profile with unchanged power stays valid for a month; seasons can change game rules, so not forever.
+export const PROFILE_MAX_AGE=31*86400000;
 const nameKey=s=>s.normalize('NFKC').toLocaleLowerCase('pl');
 import { rebalanceWarAlternatives } from './WarAlternatives.js';
 /** Hungarian rectangular assignment, including dummy columns for no favourable target. */

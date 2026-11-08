@@ -40,8 +40,20 @@ export class WarReport {
    const free=p.enemies.filter(e=>!taken.has(e.name)).sort((x,y)=>x.power-y.power)[0];
    if(free){a.main=free.name;a.shared=false;a.mainSource='power';taken.add(free.name);}
   }
+  // War rules (GuildWarConfig): 5 attacks each, and the defeated list resets after 45 rivals, so up to
+  // (rivals − 45, max 5) of the strongest need not be beaten. Only a rival out of everyone's reach
+  // (best simulated chance below 25%) is skipped; its assigned player becomes a reserve for retries.
+  const skippable=Math.min(5,Math.max(0,p.enemies.length-45));
+  const bestChance=name=>Math.max(0,...plan.assignments.map(a=>a.matchups?.find(m=>m.name===name&&!m.error)?.probability??0));
+  const tooStrong=simulated&&skippable?p.enemies.map(e=>({name:e.name,best:bestChance(e.name)})).filter(e=>e.best<.25).sort((x,y)=>x.best-y.best).slice(0,skippable):[];
+  const skip=new Set(tooStrong.map(e=>e.name));
   const lines=plan.assignments.map(a=>{
    if(!a.main)return `🔴 **${clean(a.name)}** → brak wolnego przeciwnika`;
+   if(skip.has(a.main)) {
+    const retry=(a.matchups??[]).filter(m=>!m.error&&!skip.has(m.name)&&m.name!==a.main).sort((x,y)=>y.probability-x.probability).slice(0,3)
+     .map(m=>`${clean(m.name)} ${percent(m.probability)}`).join(', ');
+    return `🔁 **${clean(a.name)}** → rezerwa (${clean(a.main)} poza zasięgiem, ${odds(a,a.main).text})${retry?` · dobij: ${retry}`:''}`;
+   }
    const main=odds(a,a.main);
    const marker=a.shared?'🟠':main.source==='power'?'⚖️':main.good?'🟢':'🟡';
    // Alternatives stay short: the name, plus the chance only when a simulation exists (never power).
@@ -49,15 +61,18 @@ export class WarReport {
    return `${marker} **${clean(a.name)}** → **${clean(a.main)}** (${main.text})${alts?` · alt: ${alts}`:''}`;
   });
   const counts=marker=>lines.filter(x=>x.startsWith(marker)).length;
+  const tech=b=>`+${this.number(b?.damage??0,1)}% obrażeń / +${this.number(b?.health??0,1)}% zdrowia`;
   const legend=[
    testMode?'🧪 **Poza niedzielą** — rywal ma takie same bonusy jak my. W niedzielę aplikacja odczyta prawdziwe bonusy rywala.':`Wojna ${clean(row.war_day)}.`,
+   `⚙️ Tech odczytany przez aplikację: **my** ${tech(p.own_bonus)} · **rywal** ${testMode?'= nasz (założenie)':tech(p.enemy_bonus)}`,
    `**${clean(p.own_clan??'Nasz klan')}** (${p.ours.length}) vs **${clean(p.enemy_clan??'Rywal')}** (${p.enemies.length})`,
    'Format: **gracz** → **przeciwnik** (szansa wygranej) · alt: zapasowe cele (z szansą, jeśli jest symulacja).',
    `🟢 przewaga w symulacji (${counts('🟢')}) · 🟡 szansa ≤50% (${counts('🟡')}) · ⚖️ dobór wg mocy, brak pełnych danych (${counts('⚖️')})${counts('🟠')?` · 🟠 wspólny cel (${counts('🟠')})`:''}${counts('🔴')?` · 🔴 bez celu (${counts('🔴')})`:''}`,
+   ...(tooStrong.length?[`🔁 Rezerwa (${counts('🔁')}): do resetu listy wystarczy pokonać 45 rywali, więc ${tooStrong.length} poza zasięgiem (${tooStrong.map(e=>clean(e.name)).join(', ')}) pomijamy. Rezerwa dobija rywali, których atak się nie udał.`]:[]),
    simulated?`Szanse to wynik modelu walki, nie gwarancja. Profile: ${plan.completeOurs}/${p.ours.length} + ${plan.completeEnemies}/${p.enemies.length}.`:'Brak symulacji — dobór wyłącznie według mocy z bonusami.',
   ].join('\n');
   // Pack lines into ≤4000-character embeds and ≤5800 characters per message.
-  const title=`⚔️ Lista wojenna · ${testMode?'poza niedzielą':clean(row.war_day)}`;
+  const title=testMode?'🧪 LISTA POGLĄDOWA BEZ TECHU RYWALA':`⚔️ Lista wojenna · ${clean(row.war_day)}`;
   const pages=[];let embeds=[{title,color:0x61d6ac,description:legend+'\n\n'}],used=title.length+legend.length+2;
   for(const line of lines) {
    const last=embeds.at(-1);
@@ -69,7 +84,8 @@ export class WarReport {
   page=Math.min(Math.max(0,Number.isFinite(page)?Math.trunc(page):0),pages.length-1);
   const visible=structuredClone(pages[page]);
   if(pages.length>1)visible.at(-1).footer={text:`Strona ${page+1}/${pages.length}`};
-  return {embeds:visible,allowed_mentions:{parse:[]},
+  // Every page of a preview carries a large warning above the list.
+  return {...(testMode?{content:'# ⚠️ LISTA POGLĄDOWA BEZ TECHU\n## Czekaj na update niedzielny'}:{}),embeds:visible,allowed_mentions:{parse:[]},
    components:pages.length>1?[{type:1,components:[{type:2,style:2,label:'◀ Poprzednia',disabled:page===0,custom_id:`report:${userId}:${testMode?'war-test':'war-list'}:${page-1}`},{type:2,style:2,label:'Następna ▶',disabled:page===pages.length-1,custom_id:`report:${userId}:${testMode?'war-test':'war-list'}:${page+1}`}]}]:[]};
  }
 }

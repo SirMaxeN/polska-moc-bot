@@ -43,7 +43,9 @@ export class WeeklyReminders {
         const retryAt = now.getTime() + Math.min(3600000, 60000 * 2 ** Math.min(job.attempts - 1, 6));
         try {
           const base = job.cycle.startsWith('daily:') ? DailyReminders.message(job.cycle.slice(6)) : WeeklyReminders.message();
-          const lists = await new ParticipationReminders(this.database, this.token, this.request).messages(job.guild_id, now);
+          // Sunday's daily reminder carries no "missing update" lists: updates are due after Monday's reset.
+          const sunday = job.cycle.startsWith('daily:') && DailyReminders.weekday(job.cycle.slice(6)) === 0;
+          const lists = sunday ? [] : await new ParticipationReminders(this.database, this.token, this.request).messages(job.guild_id, now);
           let deliveredId;
           let failed = false;
           for (const [part, payload] of [base, ...lists].entries()) {

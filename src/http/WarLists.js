@@ -13,7 +13,7 @@ export class WarLists {
   const weekStart=calendar?calendar.boundary(calendar.cycle(new Date(this.clock())).monday).getTime():-Infinity;
   const preview=find('TEST');
   const shown=real??(preview&&Date.parse(preview.created_at)>=weekStart?preview:null);
-  return {war_day:day,locked:!!real,reason:real?'Lista na tę wojnę została już utworzona. Nie nadpisujemy jej.':null,list_updated_at:shown?.created_at??null,list_sunday:!!real};
+  return {war_day:day,locked:!!real,reason:real?'Lista na tę wojnę została już utworzona. Nie nadpisujemy jej.':null,list_updated_at:shown?.created_at??null,list_sunday:!!real,can_override:device.manager===true};
  }
  save(device,body,testMode=false) {
   const {day}=this.current(device,testMode);
@@ -34,7 +34,14 @@ export class WarLists {
   const plan=body.simulation?planHybridWar(validateSimulation(body,ours,enemies,this.clock(),{allowUnknown:true}),ours,enemies,body.own_bonus,body.enemy_bonus):matchWar(ours,enemies,ownBoost,enemyBoost);
   return this.database.transaction(()=>{
    const old=this.database.db.prepare('SELECT * FROM war_lists WHERE guild_id=? AND war_day=?').get(device.guild_id,day);
-   if(old && !testMode) {if(old.request_id===body.request_id)return {status:'saved',war_day:day};throw new Error('Lista na tę wojnę już istnieje. Zapis został zablokowany.');}
+   if(old && !testMode) {
+    if(old.request_id===body.request_id)return {status:'saved',war_day:day};
+    // Only management may replace the Sunday list, and only after confirming in the app.
+    if(!(body.overwrite===true&&device.manager===true))throw new Error(device.manager?'Lista na tę wojnę już istnieje. Potwierdź aktualizację w aplikacji.':'Lista na tę wojnę już istnieje. Zapis został zablokowany.');
+    this.database.db.prepare('DELETE FROM war_lists WHERE guild_id=? AND war_day=?').run(device.guild_id,day);
+    this.database.db.prepare('INSERT INTO war_lists VALUES(?,?,?,?,?,?)').run(device.guild_id,day,body.request_id,device.user_id,new Date(this.clock()).toISOString(),JSON.stringify({...body,plan}));
+    return {status:'saved',war_day:day,updated:true};
+   }
    if(testMode)this.database.db.prepare('DELETE FROM war_lists WHERE guild_id=? AND war_day=?').run(device.guild_id,day);
    this.database.db.prepare('INSERT INTO war_lists VALUES(?,?,?,?,?,?)').run(device.guild_id,day,body.request_id,device.user_id,new Date(this.clock()).toISOString(),JSON.stringify({...body,plan}));
    return {status:'saved',war_day:day,created:true};

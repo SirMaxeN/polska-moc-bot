@@ -60,6 +60,20 @@ export class ParticipationReminders {
     return Ascension.members(roles, members, this.database.ascensionRoles(guildId));
   }
 
+  /** Management: a role chosen in /setup → Role zarządu, or a role with the Administrator permission. */
+  async isManager(guildId, userId) {
+    const response = await this.request(`https://discord.com/api/v10/guilds/${guildId}/members/${userId}`, {
+      headers: { Authorization: `Bot ${this.token}` }, signal: AbortSignal.timeout(8000), redirect: 'error',
+    });
+    if (!response.ok) return false;
+    const member = await response.json();
+    const managers = this.database.managementRoles(guildId);
+    if (member.roles?.some(role => managers.includes(role))) return true;
+    const roles = await this.guildRoles(guildId);
+    const administrator = new Set(roles.filter(role => (BigInt(role.permissions ?? '0') & 8n) === 8n).map(role => role.id));
+    return member.roles?.some(role => administrator.has(role)) ?? false;
+  }
+
   static withAscensions(snapshot, map) {
     return { ...snapshot, players: snapshot.players.map(player => ({ ...player, ascension: map.get(player.user_id) ?? [] })) };
   }

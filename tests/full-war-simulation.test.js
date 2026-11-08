@@ -51,7 +51,7 @@ test('season 2026-11 Tira is simulated while reflect stays guarded',()=>{
  b.simulation.matrix=b.simulation.matrix.map(x=>x.ally===0?{ally:x.ally,enemy:x.enemy,error:'Odbicie: efekt niepotwierdzony'}:x);assert.equal(plan(b).validPairs,2);
 });
 test('invalid pair counts, duplicates, fake samples and mismatched/stale profiles are rejected',()=>{
- for(const mutate of [b=>b.simulation.matrix.pop(),b=>b.simulation.matrix[1]=b.simulation.matrix[0],b=>b.simulation.matrix[0].wins++,b=>b.simulation.matrix[0].trials=10,b=>b.profiles.ours[0].name='Someone else',b=>b.profiles.ours[0].scannedAt-=8*86400000+1,b=>b.profiles.ours[0].pets=4,b=>b.profiles.ours[0].skills[0].level=0,b=>b.profiles.ours[0].fairy={type:'UNKNOWN',level:8}]){const b=fixture();mutate(b);assert.throws(()=>plan(b));}
+ for(const mutate of [b=>b.simulation.matrix.pop(),b=>b.simulation.matrix[1]=b.simulation.matrix[0],b=>b.simulation.matrix[0].wins++,b=>b.simulation.matrix[0].trials=10,b=>b.profiles.ours[0].name='Someone else',b=>b.profiles.ours[0].scannedAt-=31*86400000+1,b=>b.profiles.ours[0].pets=4,b=>b.profiles.ours[0].skills[0].level=0,b=>b.profiles.ours[0].fairy={type:'UNKNOWN',level:8}]){const b=fixture();mutate(b);assert.throws(()=>plan(b));}
 });
 test('a fully unknown matrix cannot be saved as a combat probability report',()=>{
  const b=fixture();b.profiles.ours.fill(null);b.simulation.matrix=b.simulation.matrix.map(x=>({ally:x.ally,enemy:x.enemy,error:'Brak profilu'}));assert.throws(()=>plan(b),/Brak choć jednej/);
@@ -86,4 +86,22 @@ test('equal simulated chances send stronger allies to stronger rivals so weaker 
 });
 test('incrementally reused profiles from earlier this week remain valid',()=>{
  const b=fixture();b.profiles.ours[0].scannedAt-=6*86400000;assert.equal(plan(b).validPairs,4);
+});
+
+test('rivals out of everyone\'s reach make reserves only when the 45-defeat reset lets them be skipped',()=>{
+ const report=(count,hard)=>{
+  const b=fixture(count);
+  b.simulation.matrix=b.simulation.matrix.map(x=>x.enemy>=count-hard?{...x,wins:20,losses:1004}:{...x,wins:x.enemy===x.ally?800:600,losses:x.enemy===x.ally?224:424});
+  const row={war_day:'TEST',payload:JSON.stringify({...b,plan:plan(b)})};
+  const view=WarReport.render(row,'u',0,true);
+  return [...new Set([view,...Array.from({length:8},(_,i)=>WarReport.render(row,'u',i+1,true))].flatMap(v=>v.embeds).flatMap(e=>e.description.split('\n')))].join('\n');
+ };
+ const tough=report(48,3);
+ assert.equal((tough.match(/^🔁 \*\*/gm)??[]).length,3,'48 rivals: three can be skipped and all three are out of reach');
+ assert.match(tough,/Rezerwa \(3\): do resetu listy wystarczy pokonać 45 rywali/);
+ assert.match(tough,/rezerwa \(Rywal4[567] poza zasięgiem, [0-9,]+%\) · dobij: /);
+ const easy=report(48,0);
+ assert.doesNotMatch(easy,/🔁/,'nobody is out of reach: no reserves');
+ const small=report(4,1);
+ assert.doesNotMatch(small,/🔁/,'four rivals: the reset needs all of them');
 });

@@ -1,5 +1,7 @@
 import { WarLists } from './WarLists.js';
 import { ClanRankings } from './ClanRankings.js';
+import { SharedLearning } from './SharedLearning.js';
+import { SharedProfiles } from './SharedProfiles.js';
 import { createHash, randomBytes } from 'node:crypto';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -12,13 +14,16 @@ export class MobileError extends Error {
 
 /** Device credentials are scoped to one Discord member and guild; only hashes are persisted. */
 export class MobileSync {
-  constructor(database, scoring, { clock = () => Date.now(), announcer = null } = {}) {
+  constructor(database, scoring, { clock = () => Date.now(), announcer = null, isManager = async () => false } = {}) {
     this.database = database;
     this.announcer = announcer;
+    this.isManager = isManager;
     this.scoring = scoring;
     this.clock = clock;
     this.warLists = new WarLists(database,clock);
     this.clanRankings = new ClanRankings(database,clock);
+    this.learning = new SharedLearning(database,clock);
+    this.sharedProfiles = new SharedProfiles(database,clock);
     this.limits = new Map();
     database.db.exec(`
       CREATE TABLE IF NOT EXISTS mobile_pairings(hash TEXT PRIMARY KEY,guild_id TEXT NOT NULL,user_id TEXT NOT NULL,name TEXT NOT NULL,expires INTEGER NOT NULL);
@@ -123,7 +128,7 @@ export class MobileSync {
   }
 
   async receive(request, response, path, send) {
-    const match = path.match(/^(?:\/discord\/botyslaw-smith)?\/mobile\/(pair|resources|war-status|war-list|war-test|clan-ranking)$/);
+    const match = path.match(/^(?:\/discord\/botyslaw-smith)?\/mobile\/(pair|resources|war-status|war-list|war-test|clan-ranking|learning|profiles)$/);
     if (!match) return false;
     try {
       if (request.method !== 'POST') throw new MobileError(405, 'Method not allowed');
@@ -133,7 +138,7 @@ export class MobileSync {
       const chunks = []; let length = 0;
       for await (const chunk of request) {
         length += chunk.length;
-        if (length > (['war-list','war-test','clan-ranking'].includes(match[1]) ? 2*1024*1024 : 4096)) throw new MobileError(413, 'Request too large');
+        if (length > (['war-list','war-test','clan-ranking','profiles'].includes(match[1]) ? 2*1024*1024 : match[1]==='learning' ? 512*1024 : 4096)) throw new MobileError(413, 'Request too large');
         chunks.push(chunk);
       }
       let body;
@@ -141,10 +146,17 @@ export class MobileSync {
       catch { throw new MobileError(400, 'Invalid JSON'); }
       if (!body || typeof body !== 'object' || Array.isArray(body)) throw new MobileError(400, 'Invalid JSON object');
       let result;
-      if(match[1].startsWith('war-')) {const device=this.authenticate(request.headers.authorization);try {result=match[1]==='war-status'?{...this.warLists.status(device),...this.clanRankings.status(device.guild_id)}:this.warLists.save(device,body,match[1]==='war-test');}catch(e){throw new MobileError(409,e.message);}
+      if(match[1].startsWith('war-')) {const paired=this.authenticate(request.headers.authorization);
+        // Management status is read from Discord only when it matters (status and a confirmed overwrite).
+        const needsRole=match[1]==='war-status'||(match[1]==='war-list'&&body.overwrite===true);
+        const device={...paired,manager:needsRole?await this.isManager(paired.guild_id,paired.user_id).catch(()=>false):false};
+        try {result=match[1]==='war-status'?{...this.warLists.status(device),...this.clanRankings.status(device.guild_id)}:this.warLists.save(device,body,match[1]==='war-test');}catch(e){throw new MobileError(409,e.message);}
         // Only the first locked Sunday list (enemy tech scanned) is announced; previews and retries are silent.
         if(match[1]==='war-list'&&result.created){const {created,...reply}=result;result=reply;void this.announcer?.send(device.guild_id,result.war_day);}
+        else if(match[1]==='war-list'&&result.updated){void this.announcer?.send(device.guild_id,result.war_day,body.request_id);}
         else if(result.created){const {created,...reply}=result;result=reply;}}
+      else if(match[1]==='learning') {this.authenticate(request.headers.authorization);result=this.learning.sync(body);}
+      else if(match[1]==='profiles') {const device=this.authenticate(request.headers.authorization);result=this.sharedProfiles.exchange(device,body);}
       else if(match[1]==='clan-ranking') {const device=this.authenticate(request.headers.authorization);try {result=this.clanRankings.save(device,body);}catch(e){throw new MobileError(409,e.message);}}
       else result = match[1] === 'pair' ? this.pair(body) : this.update(request.headers.authorization, body);
       send(response, 200, result);

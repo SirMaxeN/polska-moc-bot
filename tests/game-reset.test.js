@@ -42,8 +42,13 @@ test('calendar correction resets stale resources once and retains fresh post-res
 });
 
 test('daily reminder clock stays local at 20 while game-end text changes with DST', () => {
-  assert.match(DailyReminders.message('2026-10-25').content, /jutro o \*\*01:00\*\*/);
-  assert.match(DailyReminders.message('2026-03-29').content, /jutro o \*\*02:00\*\*/);
+  // Both dates are Sundays (DST changes): no /update request, resources are due after Monday's reset.
+  assert.match(DailyReminders.message('2026-10-25').content, /w poniedziałek po resecie\*\* \(01:00, czasu polskiego\)/);
+  assert.match(DailyReminders.message('2026-03-29').content, /w poniedziałek po resecie\*\* \(02:00, czasu polskiego\)/);
+  assert.doesNotMatch(DailyReminders.message('2026-10-25').content, /\/update/);
+  assert.match(DailyReminders.message('2026-10-25').content, /\/report war-list/);
+  assert.match(DailyReminders.message('2026-10-24').content, /jutro o \*\*02:00\*\*/);
+  assert.match(DailyReminders.message('2026-10-24').content, /\/update/);
   assert.equal(DailyReminders.next(new Date('2026-10-26T12:00:00Z')).toISOString(), '2026-10-26T19:00:00.000Z');
   assert.equal(DailyReminders.next(new Date('2026-07-06T12:00:00Z')).toISOString(), '2026-07-06T18:00:00.000Z');
 });
