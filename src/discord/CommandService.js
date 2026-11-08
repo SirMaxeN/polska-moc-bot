@@ -94,6 +94,8 @@ export class CommandService {
       const user = interaction.member.user;
       const userId = user.id;
       this.database.ensure(guildId, now);
+      // The war list button in menus is active on Sunday and whenever this week already has an official list.
+      Navigation.officialWarList = !!this.mobile?.warLists.official(guildId);
       const snapshot = () => this.database.snapshot(guildId, now);
       if (interaction.type === 2) {
         const { name, options = [] } = interaction.data;
@@ -125,9 +127,9 @@ export class CommandService {
         if (name === 'copy') {
           if (!this.mobile) throw new UserInputError('Lista wojenna nie jest dostępna.');
           const copy = this.mobile.warLists.copy(guildId);
-          if (!copy) throw new UserInputError('Nie ma jeszcze listy wojennej w tym tygodniu.');
+          if (!copy) throw new UserInputError('Nie ma jeszcze oficjalnej listy wojennej. Kopiowanie będzie dostępne, gdy pojawi się oficjalna lista.');
           // One plain message per chunk (≤280 characters — the in-game chat limit — whole players only) for easy copying into the game chat.
-          const messages = [...(copy.preview ? ['⚠️ Lista poglądowa bez techu — oficjalna pojawi się w niedzielę.'] : []), ...copy.chunks];
+          const messages = copy.chunks;
           return { response: this.reply(messages[0]), followUps: messages.slice(1).map(text => this.reply(text).data) };
         }
         if (name === 'help') return this.reply(PlayerHelp.panel(userId));
@@ -196,6 +198,15 @@ export class CommandService {
         if (kind === 'selected' && interaction.type === 3) {
           const result = this.selectedReports.handle(rawPage, action, interaction.data.values, userId, guildId, snapshot(), this.database.calendar, now);
           return result.report ? this.reportReply('selected', result.report, userId, now, 4, guildId) : this.reply(result.panel, 7);
+        }
+        if (kind === 'warpromote' && interaction.type === 3) {
+          this.management(interaction);
+          if (!this.mobile) throw new UserInputError('Lista wojenna nie jest dostępna.');
+          let promoted;
+          try { promoted = this.mobile.warLists.promote(guildId, userId); } catch (error) { throw new UserInputError(error.message); }
+          if (action === 'ping') void this.mobile.announcer?.send(guildId, promoted.war_day, promoted.request_id, this.mobile.listMessages(guildId));
+          Navigation.officialWarList = true;
+          return this.reply({ content: `✅ Podgląd jest teraz oficjalną listą wojenną (wojna ${promoted.war_day}). ${action === 'ping' ? 'Wysłano @everyone z listą na kanał przypomnień.' : 'Bez powiadomienia.'} Wszyscy zobaczą ją w /report war-list.`, embeds: [], components: Navigation.all(userId) }, 7);
         }
         if (kind === 'setup' && interaction.type === 3) {
           this.management(interaction);

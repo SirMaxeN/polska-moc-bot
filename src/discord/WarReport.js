@@ -87,10 +87,11 @@ export class WarReport {
    return `${marker} **${clean(a.name)}** → **${clean(a.main)}** (${main.text})${alts?` · alt: ${alts}`:''}`;
   });
   const counts=marker=>lines.filter(x=>x.startsWith(marker)).length;
+  const realTech=p.real_tech===true;
   const tech=b=>`+${this.number(b?.damage??0,1)}% obrażeń / +${this.number(b?.health??0,1)}% zdrowia`;
   const legend=[
-   testMode?'🧪 **Poza niedzielą** — rywal ma takie same bonusy jak my. W niedzielę aplikacja odczyta prawdziwe bonusy rywala.':`Wojna ${clean(row.war_day)}.`,
-   `⚙️ Tech odczytany przez aplikację: **my** ${tech(p.own_bonus)} · **rywal** ${testMode?'= nasz (założenie)':tech(p.enemy_bonus)}`,
+   testMode?(realTech?'🧪 **Podgląd z prawdziwym techem rywala** — oficjalna lista pozostaje bez zmian, dopóki zarząd nie zatwierdzi podglądu.':'🧪 **Poza niedzielą** — rywal ma takie same bonusy jak my. W niedzielę aplikacja odczyta prawdziwe bonusy rywala.'):`Wojna ${clean(row.war_day)}.`,
+   `⚙️ Tech odczytany przez aplikację: **my** ${tech(p.own_bonus)} · **rywal** ${testMode&&!realTech?'= nasz (założenie)':tech(p.enemy_bonus)}`,
    `**${clean(p.own_clan??'Nasz klan')}** (${p.ours.length}) vs **${clean(p.enemy_clan??'Rywal')}** (${p.enemies.length})`,
    'Format: **gracz** → **przeciwnik** (szansa wygranej) · alt: zapasowe cele (z szansą, jeśli jest symulacja).',
    `🟢 przewaga w symulacji (${counts('🟢')}) · 🟡 szansa ≤50% (${counts('🟡')}) · ⚖️ dobór wg mocy, brak pełnych danych (${counts('⚖️')})${counts('🟠')?` · 🟠 wspólny cel (${counts('🟠')})`:''}${counts('🔴')?` · 🔴 bez celu (${counts('🔴')})`:''}`,
@@ -98,7 +99,7 @@ export class WarReport {
    simulated?`Szanse to wynik modelu walki, nie gwarancja. Profile: ${plan.completeOurs}/${p.ours.length} + ${plan.completeEnemies}/${p.enemies.length}.`:'Brak symulacji — dobór wyłącznie według mocy z bonusami.',
   ].join('\n');
   // Pack lines into ≤4000-character embeds and ≤5800 characters per message.
-  const title=testMode?'🧪 LISTA POGLĄDOWA BEZ TECHU RYWALA':`⚔️ Lista wojenna · ${clean(row.war_day)}`;
+  const title=testMode?(realTech?'🧪 LISTA POGLĄDOWA (tech rywala odczytany)':'🧪 LISTA POGLĄDOWA BEZ TECHU RYWALA'):`⚔️ Lista wojenna · ${clean(row.war_day)}`;
   const pages=[];let embeds=[{title,color:0x61d6ac,description:legend+'\n\n'}],used=title.length+legend.length+2;
   for(const line of lines) {
    const last=embeds.at(-1);
@@ -111,7 +112,9 @@ export class WarReport {
   const visible=structuredClone(pages[page]);
   if(pages.length>1)visible.at(-1).footer={text:`Strona ${page+1}/${pages.length}`};
   // Every page of a preview carries a large warning above the list.
-  return {...(testMode?{content:'# ⚠️ LISTA POGLĄDOWA BEZ TECHU\n## Czekaj na update niedzielny'}:{}),embeds:visible,allowed_mentions:{parse:[]},
-   components:pages.length>1?[{type:1,components:[{type:2,style:2,label:'◀ Poprzednia',disabled:page===0,custom_id:`report:${userId}:${testMode?'war-test':'war-list'}:${page-1}`},{type:2,style:2,label:'Następna ▶',disabled:page===pages.length-1,custom_id:`report:${userId}:${testMode?'war-test':'war-list'}:${page+1}`}]}]:[]};
+  // Management can promote the preview to this week's official list on any day (checked on click).
+  const promote=testMode&&userId?[{type:1,components:[{type:2,style:1,label:'Ustaw jako oficjalną i pinguj',emoji:{name:'⬆️'},custom_id:`warpromote:${userId}:ping`},{type:2,style:2,label:'Ustaw jako oficjalną',emoji:{name:'⬆️'},custom_id:`warpromote:${userId}:silent`}]}]:[];
+  return {...(testMode?{content:realTech?'# ⚠️ LISTA POGLĄDOWA\n## Oficjalna lista bez zmian: /report war-list':'# ⚠️ LISTA POGLĄDOWA BEZ TECHU\n## Czekaj na update niedzielny'}:{}),embeds:visible,allowed_mentions:{parse:[]},
+   components:[...(pages.length>1?[{type:1,components:[{type:2,style:2,label:'◀ Poprzednia',disabled:page===0,custom_id:`report:${userId}:${testMode?'war-test':'war-list'}:${page-1}`},{type:2,style:2,label:'Następna ▶',disabled:page===pages.length-1,custom_id:`report:${userId}:${testMode?'war-test':'war-list'}:${page+1}`}]}]:[]),...promote]};
  }
 }

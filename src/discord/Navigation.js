@@ -1,5 +1,7 @@
 import { battleWindow } from '../domain/WarPreparation.js';
 export class Navigation {
+  /** Set per interaction: this week already has an official war list (e.g. a promoted preview). */
+  static officialWarList = false;
   static welcome() {
     return [{ type: 1, components: [
       { type: 2, style: 2, label: 'Pomoc', emoji: { name: '❓' }, custom_id: 'welcome:help' },
@@ -29,6 +31,6 @@ export class Navigation {
       ['selected', 'Wybrani gracze', '📌'], ['updated', 'Dzisiejsze aktualizacje', '✅'], ['missing', 'Brakujące aktualizacje', '📋'], ['war-list', 'Lista wojenna', '⚔️'], ['clan-ranking', 'Ranking klanu', '🏆'],
     ].map(([kind, label, name]) => ({ type: 2, style: 2, label, emoji: { name }, custom_id: `report:${userId}:${kind}:0`,
       // The official war list exists only on Sunday: the button is greyed out the rest of the week.
-      ...(kind === 'war-list' && !battleWindow(now) ? { disabled: true } : {}) })) }];
+      ...(kind === 'war-list' && !battleWindow(now) && !Navigation.officialWarList ? { disabled: true } : {}) })) }];
   }
 }

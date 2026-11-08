@@ -59,7 +59,7 @@ test('a fully unknown matrix cannot be saved as a combat probability report',()=
 test('full 50x50 report gives everyone a distinct rival in one short message within embed limits',()=>{
  const b=fixture(50);b.plan=plan(b);const row={war_day:'TEST',payload:JSON.stringify(b)},view=WarReport.render(row,'u',0,true);
  assert.ok(view.embeds.reduce((n,e)=>n+WarReport.length(e),0)<=6000);assert.ok(view.embeds.every(e=>(e.description?.length??0)<=4096));
- assert.equal(view.files,undefined);assert.equal(view.components.length,0);
+ assert.equal(view.files,undefined);assert.deepEqual(view.components.flatMap(r=>r.components).map(b=>b.custom_id),["warpromote:u:ping","warpromote:u:silent"],"one page: only the promote buttons");
  const text=view.embeds.map(e=>e.description).join('\n');
  const targets=[...text.matchAll(/→ \*\*(Rywal\d+)\*\*/g)].map(m=>m[1]);
  assert.equal(targets.length,50);assert.equal(new Set(targets).size,50);

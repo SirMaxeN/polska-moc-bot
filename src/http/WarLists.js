@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { WarReport } from '../discord/WarReport.js';
 import { planHybridWar,validateSimulation } from '../domain/WarSimulation.js';
 import { battleWindow,matchWar,validateRoster } from '../domain/WarPreparation.js';
@@ -17,7 +18,8 @@ export class WarLists {
  }
  save(device,body,testMode=false) {
   const {day}=this.current(device,testMode);
-  if(testMode)body={...body,war_day:day,enemy_bonus:body?.own_bonus,test_mode:true};
+  // A Sunday preview (management, "Tylko podgląd") keeps the real enemy tech; weekday previews assume ours.
+  if(testMode)body={...body,war_day:day,enemy_bonus:body?.real_tech===true?body.enemy_bonus:body?.own_bonus,test_mode:true};
   if(!body || !/^[a-f0-9-]{36}$/i.test(body.request_id??'') || body.war_day!==day || !Number.isFinite(Date.parse(body.observed_at)) || Math.abs(this.clock()-Date.parse(body.observed_at))>30*60000) throw new Error('Nieaktualny skan wojenny.');
   const ours=validateRoster(body.ours),enemies=validateRoster(body.enemies);
   if(ours.length!==body.our_count||enemies.length!==body.enemy_count) throw new Error('Skan nie obejmuje wszystkich członków.');
@@ -49,9 +51,30 @@ export class WarLists {
  }
  /** One war list: the locked Sunday list during the war window, otherwise the latest repeatable list with equal bonuses. */
  /** The official Sunday list, only during the war window (it resets with the Monday game reset). */
+ /** This game week's war day: today during the Sunday window, otherwise the coming Sunday. */
+ officialDay() {
+  const now=new Date(this.clock()),sunday=battleWindow(now);
+  if(sunday)return sunday;
+  const calendar=this.database.calendar;
+  return calendar?calendar.shift(calendar.cycle(now).monday,6):null;
+ }
+ /** The official list of this game week: the Sunday scan, or a preview promoted by management (any day). */
  official(guildId) {
-  const sunday=battleWindow(new Date(this.clock()));
-  return sunday?this.database.db.prepare('SELECT * FROM war_lists WHERE guild_id=? AND war_day=?').get(guildId,sunday)??null:null;
+  const day=this.officialDay();
+  return day?this.database.db.prepare('SELECT * FROM war_lists WHERE guild_id=? AND war_day=?').get(guildId,day)??null:null;
+ }
+ /** Management: the current preview becomes this week's official list, on any day. */
+ promote(guildId,userId) {
+  const preview=this.preview(guildId),day=this.officialDay();
+  if(!preview)throw new Error('Brak listy poglądowej do zatwierdzenia.');
+  if(!day)throw new Error('Nie ustalono dnia wojny.');
+  const payload={...JSON.parse(preview.payload),test_mode:false,war_day:day,promoted:true};
+  return this.database.transaction(()=>{
+   this.database.db.prepare('DELETE FROM war_lists WHERE guild_id=? AND war_day=?').run(guildId,day);
+   const request_id=randomUUID();
+   this.database.db.prepare('INSERT INTO war_lists VALUES(?,?,?,?,?,?)').run(guildId,day,request_id,userId,new Date(this.clock()).toISOString(),JSON.stringify(payload));
+   return {war_day:day,request_id};
+  });
  }
  /** The preview (equal tech) of the current game week; it disappears with the Monday 00:00 UTC reset. */
  preview(guildId) {
@@ -70,14 +93,14 @@ export class WarLists {
    const row=this.preview(guildId);
    return row?WarReport.render(row,userId,page,true):empty('Brak listy poglądowej w tym tygodniu. Uruchom „Odczyt listy wojennej” w aplikacji przed niedzielą.');
   }
-  if(!battleWindow(new Date(this.clock())))return empty('⏳ Lista wojenna pojawi się w niedzielę. Czekaj na niedzielny update listy.');
   const row=this.official(guildId);
-  return row?WarReport.render(row,userId,page,false):empty('Nie utworzono jeszcze niedzielnej listy wojennej. Uruchom „Odczyt listy wojennej” w aplikacji.');
+  if(row)return WarReport.render(row,userId,page,false);
+  if(!battleWindow(new Date(this.clock())))return empty('⏳ Lista wojenna pojawi się w niedzielę. Czekaj na niedzielny update listy.');
+  return empty('Nie utworzono jeszcze niedzielnej listy wojennej. Uruchom „Odczyt listy wojennej” w aplikacji.');
  }
- /** /copy war-list: the official list on Sunday, otherwise the week's preview. */
+ /** /copy war-list: only the official list of this week (Sunday scan or a promoted preview). */
  copy(guildId) {
   const official=this.official(guildId);
-  const row=official??this.preview(guildId);
-  return row?{preview:!official,chunks:WarReport.copyChunks(row)}:null;
+  return official?{chunks:WarReport.copyChunks(official)}:null;
  }
 }

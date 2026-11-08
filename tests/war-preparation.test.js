@@ -143,7 +143,7 @@ test('test war reports work on Tuesday, force equal bonuses, are repeatable and 
  assert.match(lists.report(device.guild_id,'u',new Date(now)).content,/^⏳ Lista wojenna pojawi się w niedzielę. Czekaj na niedzielny update listy.$/);assert.match(reportText(report),/enemy/);
  assert.equal(report.content,'# ⚠️ LISTA POGLĄDOWA BEZ TECHU\n## Czekaj na update niedzielny');
  assert.match(reportText(report),/⚙️ Tech odczytany przez aplikację: \*\*my\*\* \+100% obrażeń \/ \+100% zdrowia · \*\*rywal\*\* = nasz \(założenie\)/);
- assert.equal(report.files,undefined);assert.deepEqual(report.components,[]);
+ assert.equal(report.files,undefined);assert.deepEqual(report.components.flatMap(r=>r.components).map(b=>b.custom_id),["warpromote:u:ping","warpromote:u:silent"]);
  lists.save(device,{...body,request_id:randomUUID()},true);
  const stored=JSON.parse(db.db.prepare('SELECT payload FROM war_lists WHERE guild_id=? AND war_day=?').get(device.guild_id,'TEST').payload);
  assert.deepEqual(stored.enemy_bonus,stored.own_bonus);
@@ -217,19 +217,19 @@ test('management may replace the Sunday list only after confirming; others stay 
  assert.match(JSON.stringify(lists.report('g','u',new Date(now))),/120|ally/);
 });
 
-test('/copy war-list: whole players only, each message at most 280 characters, official list on Sunday',t=>{
+test('/copy war-list: only the official list, whole players only, each message at most 280 characters',t=>{
  const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());
  let now=Date.parse('2026-11-06T12:00:00Z');const lists=new WarLists(db,()=>now);const device={guild_id:'g',user_id:'u'};
  assert.equal(lists.copy('g'),null);
  const ours=Array.from({length:50},(_,i)=>({name:`Gracz_${i}_${'x'.repeat(i%7)}`,power:1000-i})),enemies=Array.from({length:50},(_,i)=>({name:`Rywal_${i}`,power:900-i}));
  lists.save(device,{request_id:randomUUID(),observed_at:new Date(now).toISOString(),ours,enemies,our_count:50,enemy_count:50,own_bonus:{damage:0,health:0}},true);
- const preview=lists.copy('g');assert.equal(preview.preview,true);
- assert.ok(preview.chunks.length>1);
- for(const chunk of preview.chunks){assert.ok(chunk.length<=280,String(chunk.length));for(const line of chunk.split('\n'))assert.match(line,/^Gracz_\d+_x* → (Rywal_\d+|rezerwa)$/);}
- assert.equal(preview.chunks.join('\n').split('\n').length,50,'every player exactly once');
+ assert.equal(lists.copy('g'),null,'a preview alone is not copied');
  now=Date.parse('2026-11-08T12:00:00Z');
  lists.save(device,{request_id:randomUUID(),war_day:'2026-11-08',observed_at:new Date(now).toISOString(),ours,enemies,our_count:50,enemy_count:50,own_bonus:{damage:0,health:0},enemy_bonus:{damage:0,health:0}});
- assert.equal(lists.copy('g').preview,false);
+ const copy=lists.copy('g');
+ assert.ok(copy.chunks.length>1);
+ for(const chunk of copy.chunks){assert.ok(chunk.length<=280,String(chunk.length));for(const line of chunk.split('\n'))assert.match(line,/^Gracz_\d+_x* → (Rywal_\d+|rezerwa)$/);}
+ assert.equal(copy.chunks.join('\n').split('\n').length,50,'every player exactly once');
 });
 
 test('the @everyone announcement is followed by the list pages',async t=>{
