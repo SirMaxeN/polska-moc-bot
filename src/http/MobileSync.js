@@ -155,7 +155,8 @@ export class MobileSync {
       let result;
       if(match[1].startsWith('war-')) {const paired=this.authenticate(request.headers.authorization);
         // Management status is read from Discord only when it matters (status and a confirmed overwrite).
-        const needsRole=match[1]==='war-status'||(match[1]==='war-list'&&body.overwrite===true);
+        // A first upload without overwrite must also learn the role, otherwise management gets "blocked" instead of the update prompt.
+        const needsRole=match[1]==='war-status'||match[1]==='war-list';
         const device={...paired,manager:needsRole?await this.isManager(paired.guild_id,paired.user_id).catch(()=>false):false};
         try {result=match[1]==='war-status'?{...this.warLists.status(device),...this.clanRankings.status(device.guild_id)}:this.warLists.save(device,body,match[1]==='war-test');}catch(e){throw new MobileError(409,e.message);}
         // Only the first locked Sunday list (enemy tech scanned) is announced; previews and retries are silent.

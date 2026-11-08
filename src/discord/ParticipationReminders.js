@@ -60,7 +60,7 @@ export class ParticipationReminders {
     return Ascension.members(roles, members, this.database.ascensionRoles(guildId));
   }
 
-  /** Management: a role chosen in /setup → Role zarządu, or a role with the Administrator permission. */
+  /** Management: a role chosen in /setup → Role zarządu, the server owner, or a role with the Administrator permission. */
   async isManager(guildId, userId) {
     const response = await this.request(`https://discord.com/api/v10/guilds/${guildId}/members/${userId}`, {
       headers: { Authorization: `Bot ${this.token}` }, signal: AbortSignal.timeout(8000), redirect: 'error',
@@ -69,6 +69,11 @@ export class ParticipationReminders {
     const member = await response.json();
     const managers = this.database.managementRoles(guildId);
     if (member.roles?.some(role => managers.includes(role))) return true;
+    // The server owner has every permission without needing a role.
+    const guild = await this.request(`https://discord.com/api/v10/guilds/${guildId}`, {
+      headers: { Authorization: `Bot ${this.token}` }, signal: AbortSignal.timeout(8000), redirect: 'error',
+    }).then(r => r.ok ? r.json() : null).catch(() => null);
+    if (guild?.owner_id && guild.owner_id === userId) return true;
     const roles = await this.guildRoles(guildId);
     const administrator = new Set(roles.filter(role => (BigInt(role.permissions ?? '0') & 8n) === 8n).map(role => role.id));
     return member.roles?.some(role => administrator.has(role)) ?? false;

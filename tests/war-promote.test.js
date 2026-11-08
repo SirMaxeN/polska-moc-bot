@@ -54,3 +54,27 @@ test('a Sunday preview keeps the real enemy tech and says the official list is u
   plain.warLists.save({ guild_id: 'g', user_id: 'u' }, preview(now), true);
   assert.match(text(plain.warLists.report('g', 'u', new Date(now), 0, true)), /= nasz \(założenie\)/);
 });
+
+test('management uploading over the Sunday list gets the update prompt, not the block (role is checked on first upload)', async t => {
+  const now = Date.parse('2026-11-15T12:00:00Z'); // Sunday
+  const db = new Database(':memory:', new WarCalendar()); t.after(() => db.close());
+  const managers = new Set(['boss']);
+  const mobile = new MobileSync(db, new ScoringService(), { clock: () => now, isManager: async (_g, user) => managers.has(user) });
+  const { createServer } = await import('node:http');
+  const server = createServer((req, res) => mobile.receive(req, res, req.url, (res, status, body) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); }));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)));
+  const day = { war_day: '2026-11-15' };
+  mobile.warLists.save({ guild_id: 'g', user_id: 'first' }, preview(now, day), false);
+  const send = async (user, extra = {}) => {
+    const token = mobile.pair({ code: mobile.code('g', user, user) }).token;
+    const reply = await fetch(`http://127.0.0.1:${server.address().port}/mobile/war-list`, { method: 'POST', headers: { 'Content-Type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify(preview(now, { ...day, ...extra })) });
+    return { status: reply.status, body: await reply.json() };
+  };
+  const boss = await send('boss');
+  assert.equal(boss.status, 409);
+  assert.match(JSON.stringify(boss.body), /Potwierdź aktualizację/);
+  const member = await send('member');
+  assert.match(JSON.stringify(member.body), /zablokowany/);
+  const confirmed = await send('boss', { overwrite: true, notify: false });
+  assert.equal(confirmed.status, 200);
+});
