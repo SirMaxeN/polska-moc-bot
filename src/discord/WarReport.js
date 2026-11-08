@@ -21,19 +21,10 @@ export class WarReport {
   * Short war list: one line per player — player → unique rival (chance) · alternatives — under a legend.
   * Posts only (no attachments). Pages are only used when the clan does not fit one message.
   */
- static render(row,userId,page=0,testMode=false) {
-  const p=JSON.parse(row.payload),simulated=p.plan.type==='simulation',clean=this.clean;
+ /** The assignments every view shares (report, ping, /copy): unique rivals, leftovers by power, reserves. */
+ static compute(row) {
+  const p=JSON.parse(row.payload),simulated=p.plan.type==='simulation';
   const plan=simulated?planHybridWar(p.plan,p.ours,p.enemies,p.own_bonus,p.enemy_bonus):rebalanceWarAlternatives(p.plan,p.ours,p.enemies,p.own_bonus,p.enemy_bonus);
-  const allies=new Map(p.ours.map(x=>[x.name,x])),enemies=new Map(p.enemies.map(x=>[x.name,x]));
-  const boost=b=>Math.sqrt((1+b.damage/100)*(1+b.health/100));
-  const ownBoost=boost(p.own_bonus),enemyBoost=boost(p.enemy_bonus);
-  const percent=x=>`${this.number(x*100,0)}%`;
-  const odds=(player,name)=>{
-   const m=simulated?player.matchups?.find(x=>x.name===name):null;
-   if(m&&!m.error)return {text:percent(m.probability),good:m.probability>.5,source:'sim'};
-   const ratio=(allies.get(player.name).power*ownBoost)/(enemies.get(name).power*enemyBoost);
-   return {text:`moc ${ratio>=1?'+':''}${this.number((ratio-1)*100,0)}%`,good:ratio>=1,source:'power'};
-  };
   // Everyone gets a distinct rival while free rivals remain: leftovers take the best free one by power.
   const taken=new Set(plan.assignments.filter(a=>a.main&&!a.shared).map(a=>a.main));
   for(const a of plan.assignments)if(!a.main||a.shared) {
@@ -46,7 +37,42 @@ export class WarReport {
   const skippable=Math.min(5,Math.max(0,p.enemies.length-45));
   const bestChance=name=>Math.max(0,...plan.assignments.map(a=>a.matchups?.find(m=>m.name===name&&!m.error)?.probability??0));
   const tooStrong=simulated&&skippable?p.enemies.map(e=>({name:e.name,best:bestChance(e.name)})).filter(e=>e.best<.25).sort((x,y)=>x.best-y.best).slice(0,skippable):[];
-  const skip=new Set(tooStrong.map(e=>e.name));
+  return {p,plan,simulated,tooStrong,skip:new Set(tooStrong.map(e=>e.name))};
+ }
+ /**
+  * In-game chat copy: "Player → Rival" (main targets only, no description), packed into messages of at
+  * most `limit` characters (in-game chat limit: 280) without splitting a player's line.
+  */
+ static copyChunks(row,limit=280) {
+  const {plan,skip}=this.compute(row);
+  const lines=plan.assignments.map(a=>`${a.name} → ${!a.main?'brak celu':skip.has(a.main)?'rezerwa':a.main}`.slice(0,limit));
+  const chunks=[];let current='';
+  for(const line of lines) {
+   if(current&&current.length+1+line.length>limit){chunks.push(current);current='';}
+   current=current?`${current}\n${line}`:line;
+  }
+  if(current)chunks.push(current);
+  return chunks;
+ }
+ /** Every page of the official list as plain messages (no buttons) for the channel post after the ping. */
+ static channelMessages(row) {
+  const first=this.render(row,'',0,false),last=first.embeds.at(-1).footer?.text?.match(/Strona 1\/(\d+)/);
+  const pages=last?Number(last[1]):1;
+  return Array.from({length:pages},(_,i)=>({embeds:(i?this.render(row,'',i,false):first).embeds,allowed_mentions:{parse:[]}}));
+ }
+ static render(row,userId,page=0,testMode=false) {
+  const clean=this.clean;
+  const {p,plan,simulated,tooStrong,skip}=this.compute(row);
+  const allies=new Map(p.ours.map(x=>[x.name,x])),enemies=new Map(p.enemies.map(x=>[x.name,x]));
+  const boost=b=>Math.sqrt((1+b.damage/100)*(1+b.health/100));
+  const ownBoost=boost(p.own_bonus),enemyBoost=boost(p.enemy_bonus);
+  const percent=x=>`${this.number(x*100,0)}%`;
+  const odds=(player,name)=>{
+   const m=simulated?player.matchups?.find(x=>x.name===name):null;
+   if(m&&!m.error)return {text:percent(m.probability),good:m.probability>.5,source:'sim'};
+   const ratio=(allies.get(player.name).power*ownBoost)/(enemies.get(name).power*enemyBoost);
+   return {text:`moc ${ratio>=1?'+':''}${this.number((ratio-1)*100,0)}%`,good:ratio>=1,source:'power'};
+  };
   const lines=plan.assignments.map(a=>{
    if(!a.main)return `🔴 **${clean(a.name)}** → brak wolnego przeciwnika`;
    if(skip.has(a.main)) {

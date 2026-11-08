@@ -17,18 +17,21 @@ export class WarAnnouncement {
   }
 
   /** Returns true when posted. No channel or token: nothing to do. Never throws. */
-  async send(guildId, warDay, update = null) {
+  async send(guildId, warDay, update = null, list = []) {
     const channel = this.database.reminderChannel(guildId);
     if (!channel || !this.token) return false;
     try {
-      // Same guild and war day → same nonce, so a retried upload cannot post twice.
-      const nonce = createHash('sha256').update(`${guildId}:war-list:${warDay}${update ? `:update:${update}` : ''}`).digest('hex').slice(0, 24);
-      const response = await this.request(`https://discord.com/api/v10/channels/${channel}/messages`, {
-        method: 'POST', headers: { Authorization: `Bot ${this.token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...WarAnnouncement.message(!!update), nonce, enforce_nonce: true }),
-        signal: AbortSignal.timeout(15000), redirect: 'error',
-      });
-      if (!response.ok) { this.logger.error('War list announcement failed: HTTP', response.status); return false; }
+      // The ping, then the list itself (every page, no buttons) so it can be read without /report.
+      for (const [part, payload] of [WarAnnouncement.message(!!update), ...list].entries()) {
+        // Same guild, war day and part → same nonce, so a retried upload cannot post twice.
+        const nonce = createHash('sha256').update(`${guildId}:war-list:${warDay}${update ? `:update:${update}` : ''}:${part}`).digest('hex').slice(0, 24);
+        const response = await this.request(`https://discord.com/api/v10/channels/${channel}/messages`, {
+          method: 'POST', headers: { Authorization: `Bot ${this.token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, nonce, enforce_nonce: true }),
+          signal: AbortSignal.timeout(15000), redirect: 'error',
+        });
+        if (!response.ok) { this.logger.error('War list announcement failed: HTTP', response.status); return false; }
+      }
       return true;
     } catch (error) {
       this.logger.error('War list announcement failed:', error.code ?? error.name);

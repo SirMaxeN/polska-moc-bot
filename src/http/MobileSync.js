@@ -1,3 +1,4 @@
+import { WarReport } from '../discord/WarReport.js';
 import { WarLists } from './WarLists.js';
 import { ClanRankings } from './ClanRankings.js';
 import { SharedLearning } from './SharedLearning.js';
@@ -127,6 +128,12 @@ export class MobileSync {
     return result;
   }
 
+  /** The official list as channel messages for the announcement (empty if it cannot be rendered). */
+  listMessages(guildId) {
+    try { const row = this.warLists.official(guildId); return row ? WarReport.channelMessages(row) : []; }
+    catch { return []; }
+  }
+
   async receive(request, response, path, send) {
     const match = path.match(/^(?:\/discord\/botyslaw-smith)?\/mobile\/(pair|resources|war-status|war-list|war-test|clan-ranking|learning|profiles)$/);
     if (!match) return false;
@@ -152,8 +159,8 @@ export class MobileSync {
         const device={...paired,manager:needsRole?await this.isManager(paired.guild_id,paired.user_id).catch(()=>false):false};
         try {result=match[1]==='war-status'?{...this.warLists.status(device),...this.clanRankings.status(device.guild_id)}:this.warLists.save(device,body,match[1]==='war-test');}catch(e){throw new MobileError(409,e.message);}
         // Only the first locked Sunday list (enemy tech scanned) is announced; previews and retries are silent.
-        if(match[1]==='war-list'&&result.created){const {created,...reply}=result;result=reply;void this.announcer?.send(device.guild_id,result.war_day);}
-        else if(match[1]==='war-list'&&result.updated){void this.announcer?.send(device.guild_id,result.war_day,body.request_id);}
+        if(match[1]==='war-list'&&result.created){const {created,...reply}=result;result=reply;void this.announcer?.send(device.guild_id,result.war_day,null,this.listMessages(device.guild_id));}
+        else if(match[1]==='war-list'&&result.updated){if(body.notify!==false)void this.announcer?.send(device.guild_id,result.war_day,body.request_id,this.listMessages(device.guild_id));}
         else if(result.created){const {created,...reply}=result;result=reply;}}
       else if(match[1]==='learning') {this.authenticate(request.headers.authorization);result=this.learning.sync(body);}
       else if(match[1]==='profiles') {const device=this.authenticate(request.headers.authorization);result=this.sharedProfiles.exchange(device,body);}

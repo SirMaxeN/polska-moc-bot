@@ -122,6 +122,14 @@ export class CommandService {
           return this.reply(WeeklyPlayerRemoval.panel(userId, snapshot().players, this.database.calendar.cycle(now).id));
         }
         if (name === 'start') return this.reply(Navigation.start(userId));
+        if (name === 'copy') {
+          if (!this.mobile) throw new UserInputError('Lista wojenna nie jest dostępna.');
+          const copy = this.mobile.warLists.copy(guildId);
+          if (!copy) throw new UserInputError('Nie ma jeszcze listy wojennej w tym tygodniu.');
+          // One plain message per chunk (≤280 characters — the in-game chat limit — whole players only) for easy copying into the game chat.
+          const messages = [...(copy.preview ? ['⚠️ Lista poglądowa bez techu — oficjalna pojawi się w niedzielę.'] : []), ...copy.chunks];
+          return { response: this.reply(messages[0]), followUps: messages.slice(1).map(text => this.reply(text).data) };
+        }
         if (name === 'help') return this.reply(PlayerHelp.panel(userId));
         if (name === 'update') {
           if (!options.length) return ResourceForm.open(userId, this.database.profile(guildId, userId));
@@ -139,9 +147,9 @@ export class CommandService {
             if (!this.mobile) throw new UserInputError('Ranking klanu jest niedostępny.');
             return this.warReportReply(this.mobile.clanRankings.report(guildId),interaction);
           }
-          if (['war-list','war-test'].includes(sub?.name)) {
+          if (['war-list','war-test','war-list-preview'].includes(sub?.name)) {
             if (!this.mobile) throw new UserInputError('Lista wojenna nie jest dostępna.');
-            try { return this.warReportReply(this.mobile.warLists.report(guildId, userId, now,0,sub.name==='war-test'),interaction); }
+            try { return this.warReportReply(this.mobile.warLists.report(guildId, userId, now,0,sub.name!=='war-list'),interaction); }
             catch (error) { throw new UserInputError(error.message); }
           }
           if (sub?.name === 'missing') return this.missingReport(interaction, now);
@@ -292,11 +300,11 @@ export class CommandService {
           return this.saveResources(interaction, values, now, snapshot().tech);
         }
         if (['report', 'report-page'].includes(kind) && interaction.type === 3) {
-          if (['war-list','war-test'].includes(action)) {
+          if (['war-list','war-test','war-list-preview'].includes(action)) {
             if (!this.mobile) throw new UserInputError('Lista wojenna nie jest dostępna.');
             const page = Number(rawPage);
             if (!Number.isSafeInteger(page) || page < 0) throw new UserInputError('Nieprawidłowa strona.');
-            try { return this.warReportReply(this.mobile.warLists.report(guildId, userId, now, page,action==='war-test'),interaction,7); }
+            try { return this.warReportReply(this.mobile.warLists.report(guildId, userId, now, page,action!=='war-list'),interaction,7); }
             catch (error) { throw new UserInputError(error.message); }
           }
           if (action === 'clan-ranking') {

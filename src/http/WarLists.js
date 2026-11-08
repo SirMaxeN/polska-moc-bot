@@ -48,16 +48,36 @@ export class WarLists {
   });
  }
  /** One war list: the locked Sunday list during the war window, otherwise the latest repeatable list with equal bonuses. */
- report(guildId,userId,now,page=0,testMode=false) {
-  const find=day=>this.database.db.prepare('SELECT * FROM war_lists WHERE guild_id=? AND war_day=?').get(guildId,day);
-  const sunday=testMode?null:battleWindow(new Date(this.clock()));
-  const real=sunday?find(sunday):null;
-  // The preview list belongs to the current game week and disappears with the Monday 00:00 UTC reset.
+ /** The official Sunday list, only during the war window (it resets with the Monday game reset). */
+ official(guildId) {
+  const sunday=battleWindow(new Date(this.clock()));
+  return sunday?this.database.db.prepare('SELECT * FROM war_lists WHERE guild_id=? AND war_day=?').get(guildId,sunday)??null:null;
+ }
+ /** The preview (equal tech) of the current game week; it disappears with the Monday 00:00 UTC reset. */
+ preview(guildId) {
+  const row=this.database.db.prepare('SELECT * FROM war_lists WHERE guild_id=? AND war_day=?').get(guildId,'TEST');
   const calendar=this.database.calendar;
   const weekStart=calendar?calendar.boundary(calendar.cycle(new Date(this.clock())).monday).getTime():-Infinity;
-  const preview=find('TEST');
-  const row=real??(preview&&Date.parse(preview.created_at)>=weekStart?preview:null);
-  if(!row)return {content:'Nie utworzono jeszcze listy wojennej. Uruchom „Lista wojenna” w aplikacji.',embeds:[],components:[],attachments:[],allowed_mentions:{parse:[]}};
-  return WarReport.render(row,userId,page,!real);
+  return row&&Date.parse(row.created_at)>=weekStart?row:null;
+ }
+ /**
+  * /report war-list shows only the official Sunday list; previews live under /report war-list-preview,
+  * so nobody mistakes an equal-tech preview for the real assignments.
+  */
+ report(guildId,userId,now,page=0,previewMode=false) {
+  const empty=content=>({content,embeds:[],components:[],attachments:[],allowed_mentions:{parse:[]}});
+  if(previewMode) {
+   const row=this.preview(guildId);
+   return row?WarReport.render(row,userId,page,true):empty('Brak listy poglądowej w tym tygodniu. Uruchom „Odczyt listy wojennej” w aplikacji przed niedzielą.');
+  }
+  if(!battleWindow(new Date(this.clock())))return empty('⏳ Lista wojenna pojawi się w niedzielę. Czekaj na niedzielny update listy.');
+  const row=this.official(guildId);
+  return row?WarReport.render(row,userId,page,false):empty('Nie utworzono jeszcze niedzielnej listy wojennej. Uruchom „Odczyt listy wojennej” w aplikacji.');
+ }
+ /** /copy war-list: the official list on Sunday, otherwise the week's preview. */
+ copy(guildId) {
+  const official=this.official(guildId);
+  const row=official??this.preview(guildId);
+  return row?{preview:!official,chunks:WarReport.copyChunks(row)}:null;
  }
 }

@@ -111,9 +111,9 @@ test('Discord menu exposes the time-gated war report and dispatches it for ordin
  const mobile=new MobileSync(db,scoring,{clock:()=>now.getTime()});
  const commands=new CommandService(db,new ReportService(calendar,scoring),scoring,mobile);
  const button=date=>Navigation.reports('u',date).flatMap(row=>row.components).find(x=>x.custom_id==='report:u:war-list:0');
- // The war list is always available: Sunday list in the war window, otherwise the equal-bonus preview.
+ // The official list button is active only on Sunday and greyed out the rest of the week.
  assert.ok(button(now)&&!button(now).disabled);
- assert.ok(button(new Date('2026-11-03T12:00:00Z'))&&!button(new Date('2026-11-03T12:00:00Z')).disabled);
+ assert.equal(button(new Date('2026-11-03T12:00:00Z')).disabled,true);
  const interaction={id:'id',type:3,guild_id:'g',member:{user:{id:'u',username:'Player'},permissions:'0'},data:{custom_id:'report:u:war-list:0'}};
  const empty=await commands.handle(interaction,now);
  assert.equal(empty.type,7);
@@ -140,7 +140,7 @@ test('test war reports work on Tuesday, force equal bonuses, are repeatable and 
  lists.save(device,body,true);
  const report=lists.report(device.guild_id,'u',new Date(now),0,true);
  assert.match(reportText(report),/LISTA POGLĄDOWA BEZ TECHU/);assert.match(reportText(report),/ally/);
- assert.match(reportText(lists.report(device.guild_id,'u',new Date(now))),/LISTA POGLĄDOWA BEZ TECHU/);assert.match(reportText(report),/enemy/);
+ assert.match(lists.report(device.guild_id,'u',new Date(now)).content,/^⏳ Lista wojenna pojawi się w niedzielę. Czekaj na niedzielny update listy.$/);assert.match(reportText(report),/enemy/);
  assert.equal(report.content,'# ⚠️ LISTA POGLĄDOWA BEZ TECHU\n## Czekaj na update niedzielny');
  assert.match(reportText(report),/⚙️ Tech odczytany przez aplikację: \*\*my\*\* \+100% obrażeń \/ \+100% zdrowia · \*\*rywal\*\* = nasz \(założenie\)/);
  assert.equal(report.files,undefined);assert.deepEqual(report.components,[]);
@@ -168,9 +168,9 @@ test('preview war list disappears with the weekly reset and the start menu offer
  const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());
  let now=Date.parse('2026-11-06T12:00:00Z');const lists=new WarLists(db,()=>now);const device={guild_id:'g',user_id:'u'};
  lists.save(device,{request_id:randomUUID(),observed_at:new Date(now).toISOString(),ours:[{name:'ally',power:100}],enemies:[{name:'enemy',power:90}],our_count:1,enemy_count:1,own_bonus:{damage:0,health:0}},true);
- assert.match(reportText(lists.report('g','u',new Date(now))),/ally/);
- now=Date.parse('2026-11-08T23:59:00Z');assert.match(reportText(lists.report('g','u',new Date(now))),/ally/);
- now=Date.parse('2026-11-09T00:01:00Z');assert.match(lists.report('g','u',new Date(now)).content,/Nie utworzono/);
+ assert.match(reportText(lists.report('g','u',new Date(now),0,true)),/ally/);
+ now=Date.parse('2026-11-08T23:59:00Z');assert.match(reportText(lists.report('g','u',new Date(now),0,true)),/ally/);
+ now=Date.parse('2026-11-09T00:01:00Z');assert.match(lists.report('g','u',new Date(now),0,true).content,/Brak listy poglądowej/);
  assert.ok(Navigation.reports('u').flatMap(r=>r.components).some(b=>b.custom_id==='report:u:clan-ranking:0'));
 });
 
@@ -215,4 +215,29 @@ test('management may replace the Sunday list only after confirming; others stay 
  assert.equal(lists.status({guild_id:'g',manager:true}).can_override,true);
  assert.equal(lists.status({guild_id:'g'}).can_override,false);
  assert.match(JSON.stringify(lists.report('g','u',new Date(now))),/120|ally/);
+});
+
+test('/copy war-list: whole players only, each message at most 280 characters, official list on Sunday',t=>{
+ const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());
+ let now=Date.parse('2026-11-06T12:00:00Z');const lists=new WarLists(db,()=>now);const device={guild_id:'g',user_id:'u'};
+ assert.equal(lists.copy('g'),null);
+ const ours=Array.from({length:50},(_,i)=>({name:`Gracz_${i}_${'x'.repeat(i%7)}`,power:1000-i})),enemies=Array.from({length:50},(_,i)=>({name:`Rywal_${i}`,power:900-i}));
+ lists.save(device,{request_id:randomUUID(),observed_at:new Date(now).toISOString(),ours,enemies,our_count:50,enemy_count:50,own_bonus:{damage:0,health:0}},true);
+ const preview=lists.copy('g');assert.equal(preview.preview,true);
+ assert.ok(preview.chunks.length>1);
+ for(const chunk of preview.chunks){assert.ok(chunk.length<=280,String(chunk.length));for(const line of chunk.split('\n'))assert.match(line,/^Gracz_\d+_x* → (Rywal_\d+|rezerwa)$/);}
+ assert.equal(preview.chunks.join('\n').split('\n').length,50,'every player exactly once');
+ now=Date.parse('2026-11-08T12:00:00Z');
+ lists.save(device,{request_id:randomUUID(),war_day:'2026-11-08',observed_at:new Date(now).toISOString(),ours,enemies,our_count:50,enemy_count:50,own_bonus:{damage:0,health:0},enemy_bonus:{damage:0,health:0}});
+ assert.equal(lists.copy('g').preview,false);
+});
+
+test('the @everyone announcement is followed by the list pages',async t=>{
+ const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());
+ const calls=[];const request=async(url,options)=>{calls.push(JSON.parse(options.body));return {ok:true,json:async()=>({id:'1'})};};
+ db.setReminderChannel('900000000000000000','800000000000000000');
+ const announcer=new WarAnnouncement(db,'token',{request,logger:{error(){}}});
+ assert.equal(await announcer.send('900000000000000000','2026-11-08',null,[{embeds:[{description:'strona 1'}]},{embeds:[{description:'strona 2'}]}]),true);
+ assert.equal(calls.length,3);assert.match(calls[0].content,/^@everyone/);
+ assert.equal(calls[1].embeds[0].description,'strona 1');assert.equal(new Set(calls.map(c=>c.nonce)).size,3);
 });
