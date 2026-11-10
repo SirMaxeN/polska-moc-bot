@@ -13,17 +13,37 @@ export class ResourceForm {
     ['pets', '🥚 Zwierzaki lub jajka (bez 3 bazowych)'],
   ];
 
-  static open(userId, player) {
-    // A unique modal instance prevents Discord from restoring a stale, unsent client draft.
-    return { type: 9, data: { custom_id: `resources:${userId}:save:${randomUUID()}`, title: '✏️ Aktualizuj swoje zasoby',
-      components: this.fields.map(([key, label], index) => ({ type: 18, label,
-        ...(index === 0 ? { description: 'W każdym polu: + - * / i nawiasy, np. 3+5*3=18 lub (3+5)*5-2=38. Wpisz samo działanie.' } : {}),
-        component: { type: 4, custom_id: key, style: 1, required: false, max_length: 128,
-          ...(key === 'skill_cost_x5' ? { value: String(player?.skill_cost_x5 ?? 200) }
-            : player?.[key] != null ? { value: String(player[key]) } : {}),
-        },
+  /** Extra resources shown with the clan resources and excluded from points. */
+  static extras = [
+    ['green_vials', '🧪 Zielone fiolki (badania klanu)'],
+    ['gems', '💎 Diamenty'],
+    ['red_vials', '⚗️ Czerwone fiolki'],
+    ['shells', '🥚 Skorupki'],
+    ['coins', '🪙 Monety'],
+  ];
+
+  static openExtras(userId, player) {
+    return { type: 9, data: { custom_id: `resources:${userId}:save-extra:${randomUUID()}`, title: '🧪 Dodatkowe informacje',
+      components: this.extras.map(([key, label], index) => ({ type: 18, label,
+        ...(index === 0 ? { description: 'Nie wpływają na punkty. Diamenty i zielone fiolki liczą się do darowizn w wyścigu klanu.' } : {}),
+        component: { type: 4, custom_id: key, style: 1, required: false, max_length: 128, ...(player?.[key] != null ? { value: String(player[key]) } : {}) },
       })),
     } };
+  }
+
+  // Accept submissions of combined modals opened before the update.
+  static legacyGroups = {
+    equipment: [['mounts','Wierzchowce'],['pets','Zwierzaki']],
+    extra: [['green_vials','Zielone fiolki'],['gems','Diamenty'],['red_vials','Czerwone fiolki'],['shells','Skorupki'],['coins','Monety']],
+  };
+
+  static open(userId, player) {
+    const fields=this.fields.map(([key,label],index)=>({
+      type:18,label,
+      ...(index===0?{description:'Możesz liczyć, np. 3+5*3=18. Wpisz samo działanie. Puste pole zachowuje wartość.'}:{}),
+      component:{type:4,custom_id:key,style:1,required:false,max_length:128,...(player?.[key]!=null?{value:String(player[key])}:{})},
+    }));
+    return {type:9,data:{custom_id:`resources:${userId}:save:${randomUUID()}`,title:'✏️ Aktualizuj swoje zasoby',components:fields}};
   }
 
   static costs(userId, player) {
@@ -53,15 +73,29 @@ export class ResourceForm {
       components: this.buttons(userId) };
   }
 
-  static parse(components) {
+  static parse(components, { legacyCombined = false } = {}) {
     const values = {};
+    const seen=new Set();
+    const parseValue=(key,value)=>{
+      if(seen.has(key))throw new UserInputError('Powtórzone pole zasobu.');
+      seen.add(key);
+      if(String(value??'').trim()==='')return;
+      const isCost=['skill_cost_x5','mount_cost'].includes(key);
+      values[key]=NumberParser.integer(value,{positive:isCost,implicitThousands:!isCost});
+    };
     for (const field of components.flatMap(row => row.component ? [row.component] : row.components ?? [])) {
-      if (!this.fields.some(([key]) => key === field.custom_id) && !['skill_cost_x5', 'mount_cost'].includes(field.custom_id)) throw new UserInputError('Nieznane pole aktualizacji.');
-      if (String(field.value ?? '').trim() === '') continue;
-      const isCost = ['skill_cost_x5', 'mount_cost'].includes(field.custom_id);
-      values[field.custom_id] = NumberParser.integer(field.value, {
-        positive: isCost, implicitThousands: !isCost,
-      });
+      if(legacyCombined&&Object.hasOwn(this.legacyGroups,field.custom_id)){
+        const keys=new Map(this.legacyGroups[field.custom_id].map(([key,name])=>[name.toLocaleLowerCase('pl'),key]));
+        for(const line of String(field.value??'').split(/\r?\n/).filter(line=>line.trim())){
+          const [,label,value]=line.match(/^([^:]+):(.*)$/)??[];
+          const key=label&&keys.get(label.trim().toLocaleLowerCase('pl'));
+          if(!key)throw new UserInputError('Zostaw nazwę zasobu i wpisz ilość po dwukropku.');
+          parseValue(key,value);
+        }
+        continue;
+      }
+      if (![...this.fields, ...this.extras].some(([key]) => key === field.custom_id) && !['skill_cost_x5', 'mount_cost'].includes(field.custom_id)) throw new UserInputError('Nieznane pole aktualizacji.');
+      parseValue(field.custom_id,field.value);
     }
     return values;
   }

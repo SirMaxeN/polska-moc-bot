@@ -11,7 +11,8 @@ export class Navigation {
   static update(userId) {
     return [{ type: 1, components: [{ type: 2, style: 1, label: 'Wpisz / edytuj dane',
       emoji: { name: '✏️' }, custom_id: `resources:${userId}:open` },
-      { type: 2, style: 2, label: 'Edytuj koszty', emoji: { name: '🔑' }, custom_id: `resources:${userId}:costs` }] }];
+      { type: 2, style: 2, label: 'Edytuj koszty', emoji: { name: '🔑' }, custom_id: `resources:${userId}:costs` },
+      { type: 2, style: 2, label: 'Dodatkowe informacje', emoji: { name: '🧪' }, custom_id: `resources:${userId}:open-extra` }] }];
   }
 
   static all(userId) { return [...this.update(userId), ...this.reports(userId)]; }
@@ -19,17 +20,20 @@ export class Navigation {
   static start(userId) {
     return { content: '**🏠 BotysławSmith: menu gracza**\nWybierz opcję. Ten panel i raporty widzisz tylko Ty.', embeds: [],
       components: [...this.all(userId), { type: 1, components: [
-        ['help', 'Pomoc', '❓'], ['tech-show', 'Pokaż tech', '🔬'],
-      ].map(([action, label, name]) => ({ type: 2, style: 2, label, emoji: { name }, custom_id: `menu:${userId}:${action}` })) }] };
+        ...[['help', 'Pomoc', '❓'], ['tech-show', 'Pokaż tech', '🔬']]
+          .map(([action, label, name]) => ({ type: 2, style: 2, label, emoji: { name }, custom_id: `menu:${userId}:${action}` })),
+      ] }] };
   }
 
   static reports(userId, now = new Date()) {
     return [{ type: 1, components: [
-      ['player', 'Mój raport', '📊'], ['clan', 'Raport klanu', '👥'], ['clan-details', 'Szczegóły klanu', '📋'], ['clan-ultra', 'Ultra szczegóły', '🔎'], ['resources', 'Zasoby klanu', '🎒'],
+      ['player', 'Mój raport', '📊'], ['clan', 'Raport klanu', '👥'], ['clan-details', 'Szczegóły klanu', '📋'], ['clan-ultra', 'Ultra szczegóły', '🔎'], ['selected', 'Wybrani gracze', '📌'],
     ].map(([kind, label, name]) => ({ type: 2, style: 2, label, emoji: { name }, custom_id: `report:${userId}:${kind}:0` })) },
     { type: 1, components: [
-      ['selected', 'Wybrani gracze', '📌'], ['updated', 'Dzisiejsze aktualizacje', '✅'], ['missing', 'Brakujące aktualizacje', '📋'], ['war-list', 'Lista wojenna', '⚔️'], ['clan-ranking', 'Ranking klanu', '🏆'],
-    ].map(([kind, label, name]) => ({ type: 2, style: 2, label, emoji: { name }, custom_id: `report:${userId}:${kind}:0`,
+      ['resources', 'Zasoby klanu', '🎒'], ['selected-resources', 'Wybrane zasoby', '🎒'], ['updated', 'Zaktualizowali dziś', '✅'], ['missing', 'Brak aktualizacji', '📋'],
+    ].map(([kind, label, name]) => ({ type: 2, style: 2, label, emoji: { name }, custom_id: `report:${userId}:${kind}:0` })) },
+    { type: 1, components: [['war-list', 'Lista wojenna', '⚔️'], ['clan-ranking', 'Ranking klanu', '🏆'], ['donations', 'Wyścig klanu', '🏁']]
+    .map(([kind, label, name]) => ({ type: 2, style: 2, label, emoji: { name }, custom_id: `report:${userId}:${kind}:0`,
       // The official war list exists only on Sunday: the button is greyed out the rest of the week.
       ...(kind === 'war-list' && !battleWindow(now) && !Navigation.officialWarList ? { disabled: true } : {}) })) }];
   }

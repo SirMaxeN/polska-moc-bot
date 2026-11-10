@@ -1,12 +1,18 @@
 import { rebalanceWarAlternatives } from '../domain/WarAlternatives.js';
 import { planHybridWar } from '../domain/WarSimulation.js';
+import { warDaySixCeiling } from '../domain/WarDaySix.js';
 /** Short war list. Probabilities are shown only for actual combat simulations; otherwise power. */
 export class WarReport {
+ static TECH_POTIONS_PER_LEVEL=492;
+ static TECH_GEMS_PER_LEVEL=246;
  /** Strip markdown/mentions; square brackets (clan tags like PolskaMoc[PL]) stay visible but escaped. */
  static clean(value) { return String(value).replace(/[\\`*_~|<>@#]/g,'').replace(/[\u0000-\u001f\u007f]/g,' ').trim().replace(/[[\]]/g,m=>'\\'+m); }
  /** For embed titles, which Discord does not render as markdown: same stripping, brackets left as they are. */
  static plain(value) { return String(value).replace(/[\\`*_~|<>@#]/g,'').replace(/[\u0000-\u001f\u007f]/g,' ').trim(); }
  static number(value, digits=2) { return new Intl.NumberFormat('pl-PL',{maximumFractionDigits:digits}).format(value); }
+ static brawlLine(brawl) {
+  return brawl?`🏆 Bitka (+1 000 pkt): **${this.number(100*brawl.nearest,0)}%** przy celowaniu w najbliższego na pierwszej linii · **${this.number(100*brawl.focus,0)}%** przy skupieniu ognia. Model eksperymentalny oparty na atakach podstawowych.`:'🏆 Bitka: **+1 000 pkt za wygraną**. Szacunek szans wymaga kompletu obsługiwanych profili obu klanów.';
+ }
  static power(value) {
   for(const [unit,size] of [['t',1e12],['b',1e9],['m',1e6],['k',1e3]])if(value>=size)return `${this.number(value/size)}${unit}`;
   return this.number(value);
@@ -60,6 +66,25 @@ export class WarReport {
   const pages=last?Number(last[1]):1;
   return Array.from({length:pages},(_,i)=>({embeds:(i?this.render(row,'',i,false):first).embeds,allowed_mentions:{parse:[]}}));
  }
+  /**
+   * Clan War Damage/Health upgrade hint sent by the app: levels per rival nobody beats.
+   * Cost per level 246 tech points = 492 green potions or 246 gems (forgemaster.pro clan tech, game 2.11).
+   */
+ static techHint(hint) {
+  const int=(x,lo,hi)=>Number.isInteger(x)&&x>=lo&&x<=hi?x:null;
+  if(!hint||typeof hint!=='object'||!Array.isArray(hint.enemies)||!hint.enemies.length)return [];
+  const max=int(hint.max_level,1,1000)??100,dmg=int(hint.damage_level,0,max)??0,hp=int(hint.health_level,0,max)??0;
+  const beaten=int(hint.beaten,0,100),reset=int(hint.reset_needed,0,100);
+  const cost=l=>`${this.number(l*WarReport.TECH_POTIONS_PER_LEVEL,0)} fiolek lub ${this.number(l*WarReport.TECH_GEMS_PER_LEVEL,0)} 💎`;
+  const option=(label,l,from)=>l==null?null:`${label} +${l} poz. (do ${from+l}/${max}, +${this.number(l*100,0)}%) · ${cost(l)}`;
+  const rows=hint.enemies.slice(0,10).map(e=>{
+   const name=this.clean(String(e?.name??'?').slice(0,60));
+   const options=[option('⚔️',int(e?.damage,1,max),dmg),option('❤️',int(e?.health,1,max),hp),option('⚔️+❤️ po',int(e?.both,1,max),Math.max(dmg,hp))].filter(Boolean);
+   return `• **${name}**: ${options.length?options.join(' · '):'nawet maksymalny tech nie wystarcza'}`;
+  });
+  const missing=beaten!=null&&reset!=null&&beaten<reset?` Do resetu (${reset} pokonanych) brakuje **${reset-beaten}**.`:'';
+  return [`📈 **Tech wojenny** (teraz ⚔️ ${dmg}/${max} · ❤️ ${hp}/${max}): ${hint.enemies.length} rywali poza zasięgiem.${missing} Ile poziomów trzeba, żeby ktoś z nas ich pokonał (≥50%):`,...rows];
+ }
  static render(row,userId,page=0,testMode=false) {
   const clean=this.clean;
   const {p,plan,simulated,tooStrong,skip}=this.compute(row);
@@ -96,12 +121,20 @@ export class WarReport {
    'Format: **gracz** → **przeciwnik** (szansa wygranej) · alt: zapasowe cele (z szansą, jeśli jest symulacja).',
    `🟢 przewaga w symulacji (${counts('🟢')}) · 🟡 szansa ≤50% (${counts('🟡')}) · ⚖️ dobór wg mocy, brak pełnych danych (${counts('⚖️')})${counts('🟠')?` · 🟠 wspólny cel (${counts('🟠')})`:''}${counts('🔴')?` · 🔴 bez celu (${counts('🔴')})`:''}`,
    ...(tooStrong.length?[`🔁 Rezerwa (${counts('🔁')}): do resetu listy wystarczy pokonać 45 rywali, więc ${tooStrong.length} poza zasięgiem (${tooStrong.map(e=>clean(e.name)).join(', ')}) pomijamy. Rezerwa dobija rywali, których atak się nie udał.`]:[]),
+   ...this.techHint(p.simulation?.tech_hint),
    simulated?`Szanse to wynik modelu walki, nie gwarancja. Profile: ${plan.completeOurs}/${p.ours.length} + ${plan.completeEnemies}/${p.enemies.length}.`:'Brak symulacji — dobór wyłącznie według mocy z bonusami.',
   ].join('\n');
   // Pack lines into ≤4000-character embeds and ≤5800 characters per message.
   const title=testMode?(realTech?'🧪 LISTA POGLĄDOWA (tech rywala odczytany)':'🧪 LISTA POGLĄDOWA BEZ TECHU RYWALA'):`⚔️ Lista wojenna · ${clean(row.war_day)}`;
   const pages=[];let embeds=[{title,color:0x61d6ac,description:legend+'\n\n'}],used=title.length+legend.length+2;
-  for(const line of lines) {
+  const ceiling=warDaySixCeiling(p.ours.length,p.enemies.length);
+  const brawl=plan.brawl;
+  const summary=[
+   `\n🧮 **Maksymalny potencjał dnia 6: ${this.number(ceiling.attackPoints+1000,0)} pkt**`,
+   `⚔️ Ataki: **${this.number(ceiling.attackPoints,0)} pkt** przy ${ceiling.tickets} wygranych atakach, celach od góry listy i resecie po ${ceiling.resetAt} pokonanych (${ceiling.resets} pełnych resetów).`,
+   this.brawlLine(brawl),
+  ];
+  for(const line of [...lines,...summary]) {
    const last=embeds.at(-1);
    if(used+line.length+1>5800){pages.push(embeds);embeds=[{color:0x61d6ac,description:''}];used=0;}
    else if(last.description.length+line.length+1>4000){embeds.push({color:0x61d6ac,description:''});}

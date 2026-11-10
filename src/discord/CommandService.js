@@ -3,6 +3,7 @@ import { NumberParser } from '../domain/NumberParser.js';
 import { Technology } from '../domain/Technology.js';
 import { UserInputError } from '../domain/UserInputError.js';
 import { ResourceForm } from './ResourceForm.js';
+import { DonationReport } from './DonationReport.js';
 import { Navigation } from './Navigation.js';
 import { WarOrders } from './WarOrders.js';
 import { WeeklyPlayerRemoval } from './WeeklyPlayerRemoval.js';
@@ -12,12 +13,21 @@ import { ParticipationReminders } from './ParticipationReminders.js';
 import { WeeklyReminders } from './WeeklyReminders.js';
 import { SelectedReport } from './SelectedReport.js';
 import { ReportDays } from './ReportDays.js';
+import { ReportService } from './ReportService.js';
 
 export class CommandService {
   constructor(database, reports, scoring, mobile = null) { this.database = database; this.reports = reports; this.scoring = scoring; this.orders = new WarOrders(database); this.mobile = mobile; this.selectedReports = new SelectedReport(); }
   reply(data, type = 4) {
     return { type, data: { ...(typeof data === 'string' ? { content: data } : data),
       ...(type === 4 ? { flags: 64 } : {}), allowed_mentions: { parse: [] } } };
+  }
+  resourcePicker(userId, now) {
+    const options = ReportService.resourceOptions().map(([value, label]) => ({ value, label }));
+    return { content: '**🎒 Wybrane zasoby**\nWybierz zasoby, które chcesz zobaczyć u wszystkich zapisanych graczy.', embeds: [], components: [
+      { type: 1, components: [{ type: 3, custom_id: `resource-pick:${userId}:show:${this.database.calendar.cycle(now).id}`,
+        placeholder: 'Wybierz zasoby', min_values: 1, max_values: options.length, options }] },
+      { type: 1, components: [{ type: 2, style: 2, label: 'Menu', custom_id: `menu:${userId}:start` }] },
+    ] };
   }
   warReportReply(data, interaction, type = 4) {
     if (data.files?.length && /^\d+$/.test(interaction.app_permissions ?? '') && !(BigInt(interaction.app_permissions) & (1n << 15n))) {
@@ -53,6 +63,12 @@ export class CommandService {
       ? { response, followUps: additionalMessages.map(message => this.reply(message).data) }
       : response;
   }
+  donationReport(guildId, userId, now) {
+    const {players,tech}=this.database.snapshot(guildId,now);
+    const view=DonationReport.render(players,tech.raceDonations);
+    return { content: '', embeds: view.embeds, components: Navigation.all(userId) };
+  }
+  techView(tech) { return Technology.entries.map(([key,label])=>`${label}: **${tech[key]}%**`).join('\n'); }
   missingReport(interaction, now) {
     return { eagerReport: true, response: { type: 5, data: { flags: 64 } }, complete: async () => {
       const lists = await new ParticipationReminders(this.database, WeeklyReminders.tokenFromEnvironment()).messages(interaction.guild_id, now);
@@ -72,8 +88,8 @@ export class CommandService {
     if (!roles.some(role => interaction.member?.roles?.includes(role))) throw new UserInputError('Ta opcja jest dostępna tylko dla administratora lub wskazanej roli zarządu.');
   }
   saveResources(interaction, values, now, tech) {
-    if (!Object.keys(values).length) throw new UserInputError('Nie zmieniono danych. Wpisz wartość w przynajmniej jednym polu. Puste pola zachowują poprzednie wartości.');
     const user = interaction.member.user;
+    if (!Object.keys(values).length) throw new UserInputError('Nie zmieniono danych. Wpisz wartość w przynajmniej jednym polu. Puste pola zachowują poprzednie wartości.');
     const previous = this.database.profile(interaction.guild_id, user.id);
     const prospective = { skill_tickets: 0, mount_keys: 0, hammers: 0, pets: 0, mounts: 0, ...previous, ...values };
     for (const key of ['skill_tickets', 'mount_keys', 'hammers', 'pets', 'mounts']) prospective[key] ??= 0;
@@ -119,6 +135,7 @@ export class CommandService {
           return this.reply(this.orders.menu(userId, guildId));
         }
         if (name === 'costs') return ResourceForm.costs(userId, this.database.profile(guildId, userId));
+        if (name === 'extra') return ResourceForm.openExtras(userId, this.database.profile(guildId, userId));
         if (name === 'delete') {
           this.management(interaction);
           return this.reply(WeeklyPlayerRemoval.panel(userId, snapshot().players, this.database.calendar.cycle(now).id));
@@ -145,6 +162,7 @@ export class CommandService {
         }
         const sub = options[0];
         if (name === 'report') {
+          if (sub?.name === 'donations') return this.reply(this.donationReport(guildId,userId,now));
           if (sub?.name === 'clan-ranking') {
             if (!this.mobile) throw new UserInputError('Ranking klanu jest niedostępny.');
             return this.warReportReply(this.mobile.clanRankings.report(guildId),interaction);
@@ -157,13 +175,14 @@ export class CommandService {
           if (sub?.name === 'missing') return this.missingReport(interaction, now);
           if (ReportDays.kinds.includes(sub?.name)) return this.reply(ReportDays.panel(sub.name, userId, this.database.calendar, now));
           if (sub?.name === 'selected') return this.reply(this.selectedReports.open(userId, guildId, snapshot(), this.database.calendar, now));
+          if (sub?.name === 'selected-resources') return this.reply(this.resourcePicker(userId, now));
           if (!['player', 'clan', 'clan-details', 'clan-ultra', 'resources', 'updated'].includes(sub?.name)) throw new UserInputError('Nieznany raport.');
           return this.reportReply(sub.name, snapshot(), userId, now, 4, guildId);
         }
         if (name === 'tech') {
           if (sub?.name === 'show') {
             const tech = snapshot().tech;
-            return this.reply(Technology.entries.map(([key, label]) => `${label}: **${tech[key]}%**`).join('\n'));
+            return this.reply(this.techView(tech));
           }
           this.management(interaction);
           if (sub?.name === 'update') return this.reply(this.panel(userId, snapshot().tech));
@@ -188,6 +207,13 @@ export class CommandService {
         }
         const [kind, owner, action, rawPage] = interaction.data.custom_id.split(':');
         if (owner !== userId) throw new UserInputError('Ten panel należy do innego gracza.');
+        if (kind === 'resource-pick' && interaction.type === 3) {
+          if (rawPage !== this.database.calendar.cycle(now).id) throw new UserInputError('Panel wygasł. Otwórz raport ponownie.');
+          const keys = interaction.data.values;
+          const allowed = ReportService.resourceOptions().map(([key]) => key);
+          if (action !== 'show' || !Array.isArray(keys) || !keys.length || new Set(keys).size !== keys.length || keys.some(key => !allowed.includes(key))) throw new UserInputError('Wybierz zasoby z listy.');
+          return this.reply(this.reports.render('selected-resources', { ...snapshot(), resourceKeys: allowed.filter(key => keys.includes(key)) }, userId, now));
+        }
         if (['report-days', 'report-show'].includes(kind) && interaction.type === 3) {
           if (!ReportDays.kinds.includes(action)) throw new UserInputError('Nieznany raport.');
           if (rawPage !== this.database.calendar.cycle(now).id) throw new UserInputError('Panel pochodzi z poprzedniego tygodnia. Otwórz raport ponownie.');
@@ -208,8 +234,13 @@ export class CommandService {
           Navigation.officialWarList = true;
           return this.reply({ content: `✅ Podgląd jest teraz oficjalną listą wojenną (wojna ${promoted.war_day}). ${action === 'ping' ? 'Wysłano @everyone z listą na kanał przypomnień.' : 'Bez powiadomienia.'} Wszyscy zobaczą ją w /report war-list.`, embeds: [], components: Navigation.all(userId) }, 7);
         }
+        if (kind === 'setup' && action === 'save-donations' && interaction.type === 5) {
+          this.management(interaction);
+          return this.reply('Wyścig używa stałych stawek gry i premii „Darowizny w wyścigu klanu” z /tech show.');
+        }
         if (kind === 'setup' && interaction.type === 3) {
           this.management(interaction);
+          if (action === 'donations') return this.reply(this.donationReport(guildId,userId,now),7);
           if (action === 'clan-ranking') {
             if (!this.mobile) throw new UserInputError('Ranking klanu jest niedostępny.');
             return this.warReportReply(this.mobile.clanRankings.report(guildId),interaction,7);
@@ -300,9 +331,19 @@ export class CommandService {
           // Keep old private cost buttons usable after deployment.
           if (action === 'cost') return ResourceForm.costs(userId, this.database.profile(guildId, userId));
           if (action === 'open') return ResourceForm.open(userId, this.database.profile(guildId, userId));
+          if (action === 'open-extra') return ResourceForm.openExtras(userId, this.database.profile(guildId, userId));
         }
         if (kind === 'resources' && action === 'save' && interaction.type === 5) {
           const values = ResourceForm.parse(interaction.data.components);
+          if (Object.keys(values).some(key => ResourceForm.extras.some(([extra]) => extra === key))) throw new UserInputError('Otwórz formularz Dodatkowe informacje.');
+          return this.saveResources(interaction, values, now, snapshot().tech);
+        }
+        if (kind === 'resources' && action === 'save-all' && interaction.type === 5) {
+          return this.saveResources(interaction,ResourceForm.parse(interaction.data.components,{legacyCombined:true}),now,snapshot().tech);
+        }
+        if (kind === 'resources' && action === 'save-extra' && interaction.type === 5) {
+          const values = ResourceForm.parse(interaction.data.components);
+          if (Object.keys(values).some(key => !ResourceForm.extras.some(([extra]) => extra === key))) throw new UserInputError('Nieznane pole dodatkowych informacji.');
           return this.saveResources(interaction, values, now, snapshot().tech);
         }
         if (kind === 'resources' && action === 'save-cost' && interaction.type === 5) {
@@ -322,9 +363,12 @@ export class CommandService {
             if (!this.mobile) throw new UserInputError('Ranking klanu jest niedostępny.');
             return this.warReportReply(this.mobile.clanRankings.report(guildId),interaction,7);
           }
+          if (action === 'donations') return this.reply(this.donationReport(guildId,userId,now),7);
+          if (action === 'clan-tech') return this.reply({content:this.techView(snapshot().tech),embeds:[],components:Navigation.all(userId)},7);
           if (action === 'missing') return this.missingReport(interaction, now);
           if (ReportDays.kinds.includes(action)) return this.reply(ReportDays.panel(action, userId, this.database.calendar, now), 7);
           if (action === 'selected') return this.reply(this.selectedReports.open(userId, guildId, snapshot(), this.database.calendar, now), 7);
+          if (action === 'selected-resources') return this.reply(this.resourcePicker(userId, now), 7);
           const page = Number(rawPage);
           if (!['player', 'clan', 'clan-details', 'clan-ultra', 'resources', 'updated'].includes(action) || !Number.isSafeInteger(page) || page < 0) throw new UserInputError('Nieprawidłowa strona.');
           return this.reportReply(action, snapshot(), userId, now, 7, guildId);
@@ -335,15 +379,18 @@ export class CommandService {
           if (action === 'reset') { this.database.resetTech(guildId); return this.reply({ content: 'Tech wyzerowany.', components: [] }, 7); }
           if (action === 'select' && interaction.type === 3) {
             const key = interaction.data.values?.[0];
-            if (!Technology.label(key)) throw new UserInputError('Nieznana technologia.');
+            const rule=Technology.rule(key);
+            if (!rule) throw new UserInputError('Nieznana technologia.');
             return { type: 9, data: { custom_id: `tech:${userId}:save:${key}`, title: Technology.label(key), components: [{ type: 1, components: [
-              { type: 4, custom_id: 'percentage', label: 'Bonus (0–40%, co 4%)', style: 1, value: String(snapshot().tech[key]), required: true, max_length: 8 },
+              { type: 4, custom_id: 'percentage', label: `Bonus (0–${rule.max}%, co ${rule.step}%)`, style: 1, value: String(snapshot().tech[key]), required: true, max_length: 8 },
             ] }] } };
           }
           if (action === 'save' && interaction.type === 5) {
             const key = rawPage;
             const input = interaction.data.components.flatMap(row => row.components).find(field => field.custom_id === 'percentage')?.value;
-            const value = NumberParser.percentage(input);
+            const rule=Technology.rule(key);
+            if(!rule)throw new UserInputError('Nieznana technologia.');
+            const value = NumberParser.percentage(input,rule);
             const old = snapshot().tech[key];
             this.database.updateTech(guildId, key, value);
             return this.reply(this.panel(userId, snapshot().tech, `${Technology.label(key)}: ${old}% → ${value}%.`), interaction.message ? 7 : 4);

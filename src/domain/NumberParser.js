@@ -15,9 +15,9 @@ export class NumberParser {
     return Number(value);
   }
 
-  static percentage(input) {
+  static percentage(input, {max=40,step=4}={}) {
     const value = this.integer(String(input).trim().replace(/%$/, '').trim());
-    if (value > 40 || value % 4 !== 0) throw new UserInputError('Bonus musi wynosić 0–40%, co 4%.');
+    if (value > max || value % step !== 0) throw new UserInputError(`Bonus musi wynosić 0–${max}%, co ${step}%.`);
     return value;
   }
 }

@@ -3,6 +3,7 @@ import { mkdirSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Technology } from '../domain/Technology.js';
+import { ClanTech } from '../domain/ClanTech.js';
 import { UserInputError } from '../domain/UserInputError.js';
 
 export class Database {
@@ -63,7 +64,14 @@ export class Database {
         }
       });
     }
+    // Extra resources (no effect on points): NULL = never entered. Additive, so no backup is needed.
+    const columns = new Set(this.db.prepare('PRAGMA table_info(resources)').all().map(column => column.name));
+    for (const field of Database.extraFields) if (!columns.has(field)) this.db.exec(`ALTER TABLE resources ADD COLUMN ${field} INTEGER`);
+    this.db.exec(`CREATE TABLE IF NOT EXISTS clan_tech (guild_id TEXT PRIMARY KEY, payload TEXT NOT NULL, author TEXT NOT NULL, updated_at TEXT NOT NULL);`);
   }
+
+  /** Scanned or typed extras shown with the clan resources; they never change the points. */
+  static extraFields = ['green_vials', 'gems', 'red_vials', 'shells', 'coins'];
 
   transaction(action) {
     this.db.exec('BEGIN IMMEDIATE');
@@ -100,15 +108,15 @@ export class Database {
   snapshot(guildId, now = new Date()) {
     this.ensure(guildId, now);
     return this.transaction(() => ({
-      tech: Object.fromEntries(this.db.prepare('SELECT key,value FROM tech WHERE guild_id=?').all(guildId).map(row => [row.key, row.value])),
-      players: this.db.prepare(`SELECT p.*,r.skill_tickets,r.mount_keys,r.hammers,r.pets,r.mounts,r.updated_at
+      tech: { ...Technology.defaults(), ...Object.fromEntries(this.db.prepare('SELECT key,value FROM tech WHERE guild_id=?').all(guildId).map(row => [row.key, row.value])) },
+      players: this.db.prepare(`SELECT p.*,r.skill_tickets,r.mount_keys,r.hammers,r.pets,r.mounts,r.green_vials,r.gems,r.red_vials,r.shells,r.coins,r.updated_at
         FROM players p JOIN resources r ON p.guild_id=r.guild_id AND p.user_id=r.user_id
         WHERE p.guild_id=? ORDER BY p.name,p.user_id`).all(guildId),
     }));
   }
 
   profile(guildId, userId) {
-    return this.db.prepare(`SELECT p.*,r.skill_tickets,r.mount_keys,r.hammers,r.pets,r.mounts,r.updated_at
+    return this.db.prepare(`SELECT p.*,r.skill_tickets,r.mount_keys,r.hammers,r.pets,r.mounts,r.green_vials,r.gems,r.red_vials,r.shells,r.coins,r.updated_at
       FROM players p LEFT JOIN resources r ON p.guild_id=r.guild_id AND p.user_id=r.user_id
       WHERE p.guild_id=? AND p.user_id=?`).get(guildId, userId);
   }
@@ -122,7 +130,7 @@ export class Database {
         .run(values.skill_cost_x5, guildId, userId);
       if ('mount_cost' in values) this.db.prepare('UPDATE players SET mount_cost=? WHERE guild_id=? AND user_id=?')
         .run(values.mount_cost, guildId, userId);
-      const fields = ['skill_tickets', 'mount_keys', 'hammers', 'pets', 'mounts'].filter(field => field in values);
+      const fields = ['skill_tickets', 'mount_keys', 'hammers', 'pets', 'mounts', ...Database.extraFields].filter(field => field in values);
       if (fields.length) {
         this.db.prepare(`INSERT INTO resources(guild_id,user_id,updated_at) VALUES(?,?,?)
           ON CONFLICT(guild_id,user_id) DO NOTHING`).run(guildId, userId, now.toISOString());
@@ -136,9 +144,28 @@ export class Database {
     });
   }
 
+  /** Publish verified readings to the same technology values used for scoring. */
+  saveClanTech(guildId, userId, payload, now = new Date()) {
+    this.ensure(guildId, now);
+    return this.transaction(() => {
+      const previous = this.clanTech(guildId);
+      if (previous && Date.parse(payload.observed_at) <= Date.parse(previous.observed_at)) return 0;
+      const values = Object.entries(ClanTech.values(payload));
+      for (const [key, value] of values) this.updateTech(guildId, key, value);
+      if (values.length) this.db.prepare(`INSERT INTO clan_tech VALUES(?,?,?,?) ON CONFLICT(guild_id) DO UPDATE SET payload=excluded.payload,author=excluded.author,updated_at=excluded.updated_at`)
+        .run(guildId, JSON.stringify(payload), userId, now.toISOString());
+      return values.length;
+    });
+  }
+
+  clanTech(guildId) {
+    const row = this.db.prepare('SELECT payload,author,updated_at FROM clan_tech WHERE guild_id=?').get(guildId);
+    return row ? { ...JSON.parse(row.payload), author: row.author, updated_at: row.updated_at } : null;
+  }
+
   updateTech(guildId, key, value) {
     if (!Technology.label(key)) throw new UserInputError('Nieznana technologia.');
-    this.db.prepare('UPDATE tech SET value=? WHERE guild_id=? AND key=?').run(value, guildId, key);
+    this.db.prepare('INSERT INTO tech VALUES(?,?,?) ON CONFLICT(guild_id,key) DO UPDATE SET value=excluded.value').run(guildId, key, value);
   }
 
   deleteWeeklyPlayers(guildId, userIds, cycle, now = new Date()) {

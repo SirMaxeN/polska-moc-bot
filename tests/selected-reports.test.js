@@ -40,6 +40,18 @@ test('all resource and daily report rosters use Polish nickname order without mu
   assert.deepEqual(snapshot.players.map(player => player.user_id), before);
 });
 
+test('resource picker shows the chosen resources for every saved player', async t => {
+  const { db, commands } = fixture(t);
+  db.update('22', '11', 'Ala', { hammers: 8, gems: 0 }, now);
+  db.update('22', '12', 'Bartek', { hammers: 4 }, now);
+  const picker = await commands.handle(interaction({ name: 'report', options: [{ name: 'selected-resources', type: 1 }] }), now);
+  const select = controls(picker).find(component => component.type === 3);
+  const response = await commands.handle(interaction({ custom_id: select.custom_id, values: ['gems', 'hammers'] }, 3), now);
+  assert.deepEqual(fields(response.data).map(field => field.name), ['Ala', 'Bartek']);
+  assert.match(fields(response.data)[0].value, /^\u00a0{5}\S+ Młotki: \*\*8\*\*\n\u00a0{5}💎 Diamenty: \*\*0\*\*$/);
+  assert.match(fields(response.data)[1].value, /Diamenty: \*\*brak odczytu\*\*/);
+});
+
 test('selection spans roster pages, preserves choices on day changes and calculates only selected players', async t => {
   const { db, commands, scoring } = fixture(t);
   for (let i = 30; i >= 1; i--) db.update('22', String(i), `Gracz ${i}`, { mount_keys: i * 50, mounts: i }, now);
@@ -178,7 +190,7 @@ test('detailed and ultra day selectors default to current day, filter chosen day
     assert.equal(fields(defaultReport.data).filter(field => field.name.startsWith('Suma klanu:')).length, 1);
     assert.equal(fields(defaultReport.data).at(-1).name, 'Suma klanu: dzień 2');
     assert.match(fields(defaultReport.data)[0].value, /Adam/);
-    assert.match(fields(defaultReport.data)[0].value, /Zofia/);
+    assert.match(fields(defaultReport.data).map(field => field.value).join(' '), /Zofia/);
     const changed = await click(select.custom_id, ['5', '3']);
     assert.equal(changed.type, 7);
     const result = await click(controls(changed).find(control => control.label === 'Pokaż raport').custom_id);
@@ -186,8 +198,9 @@ test('detailed and ultra day selectors default to current day, filter chosen day
     assert.doesNotMatch(fields(result.data).map(field => field.name).join('\n'), /Dzień [1246]:/);
     const all = await click(select.custom_id, ['all']);
     const full = await click(controls(all).find(control => control.label === 'Pokaż raport').custom_id);
-    assert.equal(fields(full.data).filter(field => field.name.startsWith('Suma klanu:')).length, 5);
-    assert.equal(fields(full.data).filter(field => field.name.includes('Dzień 6:')).length, 1);
+    const fullFields = [full.data ?? full.response.data, ...(full.followUps ?? [])].flatMap(fields);
+    assert.equal(fullFields.filter(field => field.name.startsWith('Suma klanu:')).length, 5);
+    assert.equal(fullFields.filter(field => field.name.includes('Dzień 6:')).length, 1);
     assert.match((await click(select.custom_id, ['7'])).data.content, /Wybierz dni/);
     assert.match((await click(select.custom_id, ['1'], now, '99')).data.content, /innego gracza/);
     assert.match((await click(select.custom_id.replace('2026-10-25', '2026-10-18'), ['1'])).data.content, /poprzedniego tygodnia/);

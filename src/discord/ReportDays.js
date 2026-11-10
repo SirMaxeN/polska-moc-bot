@@ -23,6 +23,7 @@ export class ReportDays {
           ...ReportService.weekdays.map((label, index) => ({ label: `Dzień ${index + 1}: ${label} (${cycle.starts[index].toISOString().slice(0, 10)})`,
             value: String(index + 1), default: !all && days.includes(index + 1) }))] }] },
       { type: 1, components: [{ type: 2, style: 1, label: 'Pokaż raport', custom_id: `report-show:${userId}:${kind}:${cycle.id}:${days.join(',')}` }] },
-      ...Navigation.all(userId)] };
+      // Day picker uses two rows; Discord allows five, so only the report rows follow here.
+      ...Navigation.reports(userId)] };
   }
 }

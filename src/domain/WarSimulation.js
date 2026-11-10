@@ -4,6 +4,7 @@ const skillTypes=new Set(['MEAT','ARROWS','SHOUT','BERSERK','SHURIKENS','CANNON_
 export const PROFILE_MAX_AGE=31*86400000;
 const nameKey=s=>s.normalize('NFKC').toLocaleLowerCase('pl');
 import { rebalanceWarAlternatives } from './WarAlternatives.js';
+import { simulateClanBrawl } from './ClanBrawl.js';
 /** Hungarian rectangular assignment, including dummy columns for no favourable target. */
 export function maximumExpectedWins(matrix) {
  return maximumWeightAssignment(matrix.map(row=>row.map(p=>p>.5?p:0)));
@@ -79,6 +80,7 @@ export function validateSimulation(body,ours,enemies,now,{allowUnknown=false}={}
   tooStrong:enemies.filter((_,j)=>matrix.every(row=>row[j]!==null&&row[j]<=.5)).map(x=>x.name),
   unrated:enemies.filter((_,j)=>matrix.some(row=>row[j]===null)).map(x=>x.name),
   completeOurs:a.filter(Boolean).length,completeEnemies:b.filter(Boolean).length,pairs:sim.matrix.length,validPairs:results.flat().filter(x=>!x.error).length};
+ plan.brawl=body.own_bonus&&body.enemy_bonus?simulateClanBrawl(a,b,body.own_bonus,body.enemy_bonus):null;
  return rebalanceWarAlternatives(plan,ours,enemies,body.own_bonus,body.enemy_bonus);
 }
 

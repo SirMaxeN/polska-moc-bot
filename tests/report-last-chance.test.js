@@ -11,7 +11,7 @@ test('last chance warnings follow current Warsaw war day and each saved resource
   const tech = Object.fromEntries(Technology.entries.map(([key, , value]) => [key, value]));
   const player = { user_id: '11', name: 'Player', skill_tickets: 1, mount_keys: 1, mounts: 3, hammers: 20, pets: 4, updated_at: '2026-10-15T10:00:00Z' };
   const snapshot = { tech, players: [player] };
-  const fields = payload => [payload, ...(payload.additionalMessages ?? [])].flatMap(message => message.embeds[0].fields ?? []);
+  const fields = payload => [payload, ...(payload.additionalMessages ?? [])].flatMap(message => message.embeds.flatMap(card => card.fields ?? []));
   const cases = [
     ['2026-10-15T18:00:00Z', 3, /wydanie biletów umiejętności/],
     ['2026-10-16T18:00:00Z', 4, /wydanie kluczy wierzchowców; połączenie posiadanych wierzchowców/],
@@ -25,7 +25,7 @@ test('last chance warnings follow current Warsaw war day and each saved resource
       assert.equal(warned.length, 1, `${kind}: warn only on the current final scoring day`);
       assert.ok(warned[0].name.includes(`Dzień ${day}:`));
       assert.match(warned[0].value, expected);
-      assert.match(warned[0].value.split('\n')[1], /^❗ \*\*Ostatni dzień na: .+\.\*\*$/);
+      assert.match(warned[0].value, /^(?:\u00a0{5})?❗ \*\*Ostatni dzień na: .+\.\*\*$/m);
       assert.doesNotMatch(warned[0].value, /Po tym dniu|w tej wojnie/);
     }
   }
@@ -50,10 +50,10 @@ test('last chance warnings follow current Warsaw war day and each saved resource
     const messages = [report, ...(report.additionalMessages ?? [])];
     let warnings = 0;
     for (const message of messages) {
-      const embed = message.embeds[0];
+      const embed = message.embeds.at(-1);
       assert.ok(embed.fields.length <= 25);
-      assert.ok(embed.title.length + embed.description.length + embed.footer.text.length + embed.fields.reduce((sum, field) => sum + field.name.length + field.value.length, 0) <= 6000);
-      for (const field of embed.fields) {
+      assert.ok(message.embeds.reduce((length, card) => length + (card.title?.length ?? 0) + (card.description?.length ?? 0) + (card.footer?.text.length ?? 0) + card.fields.reduce((sum, field) => sum + field.name.length + field.value.length, 0), 0) <= 6000);
+      for (const field of message.embeds.flatMap(card => card.fields)) {
         assert.ok(field.value.length <= 1024);
         warnings += (field.value.match(/❗/g) ?? []).length;
       }

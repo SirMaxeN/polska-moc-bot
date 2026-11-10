@@ -32,7 +32,7 @@ test('all clan reports show enrolment counts; small reports stay whole and large
   const tech = Technology.defaults();
   for (const kind of ['clan', 'clan-details', 'clan-ultra']) {
     const small = reports.render(kind, { tech, players: [player] }, '11', now);
-    assert.equal(small.additionalMessages, undefined);
+    assert.ok([small, ...(small.additionalMessages ?? [])].every(message => message.embeds.length <= 10));
     assert.match(small.embeds[0].description, /Wpisani: \*\*1\/\? członków\*\*/);
     assert.match(reports.render(kind, { tech, players: [] }, '11', now).embeds[0].description, /Wpisani: \*\*0\/\? członków\*\*/);
   }
@@ -42,10 +42,22 @@ test('all clan reports show enrolment counts; small reports stay whole and large
     const payload = reports.render(kind, { tech, players }, '11', now);
     const messages = [payload, ...(payload.additionalMessages ?? [])];
     assert.ok(messages.length > 6);
+    assert.match(messages[0].embeds[0].description, /Wpisani: \*\*100\/\? członków\*\*/);
+    assert.notEqual(messages[0].embeds[0].color, messages[0].embeds[1].color);
     const seen = new Map();
+    let cardDay;
     for (const message of messages) {
-      const embed = message.embeds[0];
-      assert.match(embed.description, /Wpisani: \*\*100\/\? członków\*\*/);
+      if (kind === 'clan-ultra') {
+        assert.ok(message.embeds.length <= 10);
+        for (const field of message.embeds.flatMap(card => card.fields)) {
+          const heading = /Dzień (\d):/.exec(field.name);
+          if (heading) cardDay = Number(heading[1]);
+          const names = [...field.value.matchAll(/\*\*(Player\d+)\*\*/g)].map(match => match[1]);
+          seen.set(cardDay, [...(seen.get(cardDay) ?? []), ...names]);
+        }
+        continue;
+      }
+      const embed = message.embeds.at(-1);
       assert.ok(ReportPaginator.fits(embed, embed.footer.text));
       const day = Number(/: dzień (\d)/.exec(embed.title)[1]);
       const continued = seen.has(day);
@@ -72,7 +84,9 @@ test('resource roster preserves every member across message boundaries and total
   assert.equal(messages[0].embeds[0].title, '🎒 Zasoby klanu');
   for (const message of messages.slice(1)) assert.equal(message.embeds[0].title, '🎒 Zasoby klanu (ciąg dalszy)');
   assert.ok(messages.every(message => !message.embeds[0].title.includes('undefined')));
-  const fields = messages.flatMap(message => message.embeds[0].fields);
+  const cards = messages.flatMap(message => message.embeds).slice(1);
+  assert.ok(cards.every((card, index) => card.color === (index % 2 ? 0xb94b33 : 0xc72c3b)));
+  const fields = cards.flatMap(card => card.fields);
   assert.deepEqual(fields.slice(0, -1).map(field => field.name), players.map(player => player.name));
   assert.match(fields.at(-1).value, /16\s000/);
   assert.match(fields[0].value, /max \*\*1\s?125 pkt/);
@@ -81,7 +95,7 @@ test('resource roster preserves every member across message boundaries and total
   assert.match(fields[0].value, /188/);
   assert.match(fields[0].value, /45/);
   assert.match(fields[0].value, /Aktualizacja zasobów/);
-  for (const message of messages) assert.ok(ReportPaginator.fits(message.embeds[0], message.embeds[0].footer.text));
+  for (const message of messages) assert.ok(ReportPaginator.fits(message.embeds.at(-1), message.embeds.at(-1).footer.text));
   const empty = service.render('resources', { players: [], tech: Technology.defaults() }, '0');
   assert.match(empty.embeds[0].description, /Wpisani: \*\*0\/\? członków\*\*/);
 });

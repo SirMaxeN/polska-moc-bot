@@ -25,7 +25,7 @@ export class DailyReminders {
       + `🗓️ Dziś nie aktualizujemy zasobów. Nowe zasoby wpiszesz **w poniedziałek po resecie** (${reset}, czasu polskiego).`,
     allowed_mentions: { parse: [] }, components: Navigation.welcome() };
     return { content: `**🔔 Przypomnienie o 20:00: ${this.weekdays[weekday]}**\n${this.actions[weekday]}\n\n`
-      + '✏️ Po wydaniu zasobów zaktualizuj **/update**, aby raporty klanu były aktualne. Koszty przywołań zmienisz przez **/costs**. Menu i raporty znajdziesz w **/start**.\n'
+      + '✏️ Po wydaniu zasobów zaktualizuj **/update**, aby raporty klanu były aktualne. W **/extra** uzupełnij fiolki, diamenty, skorupki i monety. Koszty przywołań zmienisz przez **/costs**. Menu i raporty znajdziesz w **/start**.\n'
       + (weekday === 1 ? `⏰ Dzień 1 zaczyna się jutro o **${reset}**, czasu polskiego.\n` : `⏰ Ten dzień wojny kończy się jutro o **${reset}**, czasu polskiego.\n`)
       + 'Rozkazy dowództwa klanu określają, kiedy wydajemy zasoby.',
     allowed_mentions: { parse: [] }, components: Navigation.welcome() };

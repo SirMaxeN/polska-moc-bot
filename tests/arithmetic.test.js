@@ -23,16 +23,18 @@ test('bounded exact arithmetic honors precedence, parentheses, whitespace and nu
   assert.equal(NumberParser.integer('200-3*4', { positive: true }), 188);
 });
 
-test('all seven resource/cost fields accept calculations with one shared hint per form', () => {
+test('resource, cost and additional information fields accept calculations', () => {
   const resourceFields = ResourceForm.open('11').data.components;
   const costFields = ResourceForm.costs('11').data.components;
   assert.equal(resourceFields.length, 5);
-  for (const fields of [resourceFields, costFields]) {
-    assert.equal(fields.filter(field => field.description).length, 1);
+  for (const fields of [resourceFields,costFields,ResourceForm.openExtras('11').data.components]) {
     assert.ok(fields[0].description.length <= 100);
-    const parsed = ResourceForm.parse(fields.map(field => ({ component: { custom_id: field.component.custom_id, value: ' (3 + 5) * 5 - 2 ' } })));
+    const expression=' (3 + 5) * 5 - 2 ';
+    const parsed = ResourceForm.parse(fields.map(({component}) => ({component:{...component,
+      value:expression,
+    }})));
     assert.ok(Object.values(parsed).every(value => value === 38));
-    assert.equal(Object.keys(parsed).length, fields.length);
+    assert.equal(Object.keys(parsed).length,fields.length);
   }
   assert.match(PlayerHelp.panel('11').embeds[0].description, /3\+5\*3 = 18/);
   assert.ok(PlayerHelp.panel('11').embeds[0].description.length <= 4096);

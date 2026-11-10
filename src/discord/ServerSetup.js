@@ -2,6 +2,7 @@ import { Navigation } from './Navigation.js';
 import { DailyReminders } from './DailyReminders.js';
 import { WeeklyReminders } from './WeeklyReminders.js';
 import { Ascension } from '../domain/Ascension.js';
+import { UserInputError } from '../domain/UserInputError.js';
 
 const ResourceLabels = { hammers: 'młotki', pets: 'zwierzaki/jajka', mount_keys: 'klucze', mounts: 'wierzchowce', skill_tickets: 'bilety' };
 
@@ -61,7 +62,8 @@ export class ServerSetup {
       + `**Ostatnia udana wysyłka:** ${last ? format(last) : 'jeszcze nie wysłano'}\n`
       + '-# Czas polski. Odliczanie jest aktualne na moment otwarcia panelu.\n\n'
       + `**🛡️ Dostęp do /ping:** ${roles.length ? roles.map(id => `<@&${id}>`).join(', ') : 'brak uprawnionych ról'}\n`
-      + `**📣 Odbiorca pingów:** ${orders.targetLabel(guildId)}`,
+      + `**📣 Odbiorca pingów:** ${orders.targetLabel(guildId)}\n`
+      + '**🏁 Wyścig klanu:** 2 🧪 = 1 pkt · 1 💎 = 1 pkt · premia z /tech show.',
     embeds: [], components: [{ type: 1, components: [
       ['channel', 'Kanał przypomnień', '🔔'], ['roles', 'Dostęp do /ping', '🛡️'], ['target', 'Odbiorca pingów', '📣'], ['management', 'Role zarządu', '👑'], ['participants', 'Uczestnicy wojny', '👥'],
     ].map(([action, label, name]) => ({ type: 2, style: 2, label, emoji: { name }, custom_id: `setup:${userId}:${action}` })) },
@@ -69,6 +71,7 @@ export class ServerSetup {
       { type: 2, style: 2, label: 'Wzniesienia', emoji: { name: Ascension.emoji }, custom_id: `setup:${userId}:ascension` },
       { type: 2, style: 2, label: 'Brakujące aktualizacje', emoji: { name: '📋' }, custom_id: `setup:${userId}:missing` },
       { type: 2, style: 2, label: 'Podgląd wszystkich przypomnień', emoji: { name: '🧪' }, custom_id: `setup:${userId}:preview` },
+      { type: 2, style: 2, label: 'Wyścig klanu', emoji: { name: '🏁' }, custom_id: `setup:${userId}:donations` },
     ] }] };
   }
 

@@ -29,7 +29,7 @@ export class WarOrders {
       ['fight', 'Do boju!', '⚔️', 'Ruszamy do walk w wojnie klanów!'],
       ['all-in', 'ALL IN: pełna mobilizacja', '🔥', 'Wydajemy wszystkie zasoby punktujące w dzisiejszym dniu wojny!'],
       ['hold', 'STOP: oszczędzamy zasoby', '🛑', 'Wstrzymujemy wydawanie zasobów. Czekamy na kolejny rozkaz.'],
-      ['update', 'Zaktualizuj dane w bocie', '🔔', 'Przypominamy o aktualizacji zasobów w Botysławie! Użyj /update i wpisz aktualne bilety, klucze, młotki, zwierzaki lub jajka do połączenia oraz posiadane wierzchowce bez 1 bazowego. Jeśli zmieniły się koszty przywołań, popraw /costs. Główne menu: /start.'],
+      ['update', 'Zaktualizuj dane w bocie', '🔔', 'Przypominamy o aktualizacji zasobów w Botysławie! Użyj /update i wpisz aktualne bilety, klucze, młotki, zwierzaki lub jajka do połączenia oraz posiadane wierzchowce bez 1 bazowego. W **/extra** uzupełnij fiolki, diamenty, skorupki i monety. Jeśli zmieniły się koszty przywołań, popraw /costs. Główne menu: /start.'],
     ]],
   ];
   constructor(database) { this.database = database; }

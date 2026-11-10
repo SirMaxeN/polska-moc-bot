@@ -55,11 +55,13 @@ export class ArithmeticParser {
       return value;
     }
     this.skip();
-    const match = /^(\d+)(?:[.,](\d+))?([kK])?/.exec(this.input.slice(this.position));
+    const match = /^(\d+)(?:[.,](\d+))?([kKmMbB])?/.exec(this.input.slice(this.position));
     if (!match || match[0].length > 32) this.fail();
     this.position += match[0].length;
     const fraction = match[2] ?? '';
-    return this.fraction(BigInt(match[1] + fraction) * (match[3] || (this.implicitThousands && match[2] !== undefined) ? 1000n : 1n), 10n ** BigInt(fraction.length));
+    // Game abbreviations: k = thousand, m = million, b = billion (e.g. coins 2.12m).
+    const suffix = { k: 1000n, m: 1_000_000n, b: 1_000_000_000n }[match[3]?.toLowerCase()];
+    return this.fraction(BigInt(match[1] + fraction) * (suffix ?? (this.implicitThousands && match[2] !== undefined ? 1000n : 1n)), 10n ** BigInt(fraction.length));
   }
   parse() {
     const result = this.expression();

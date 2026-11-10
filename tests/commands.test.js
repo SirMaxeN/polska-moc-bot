@@ -34,7 +34,6 @@ test('resource form prefills values, preserves blank fields, validates atomicall
   assert.equal(fresh.data.components.length, 5);
   assert.ok(fresh.data.components.every(row => row.type === 18 && row.label.length <= 45));
   assert.match(fresh.data.components[0].description, /3\+5\*3=18/);
-  assert.ok(fresh.data.components.slice(1).every(row => row.description === undefined));
   assert.equal(fresh.data.components[2].label, '🐎 Wierzchowce (bez 1 bazowego)');
   assert.equal(fresh.data.components[3].label, '🔨 Młotki');
   assert.equal(db.profile('22', '11'), undefined);
@@ -108,6 +107,7 @@ test('first server entry uses supplied technology and later cycles preserve admi
     forge: 0, skillSummon: 40, skillUpgrade: 40, research: 0, forgeSpending: 0,
     dungeon: 40, egg: 40, petMerge: 40, mountSummon: 40, mountMerge: 40,
     day1: 40, day2: 40, day3: 40, day4: 40, day5: 40, day6: 0,
+    raceRewards: 0, raceDonations: 0, warDamage: 0, warHealth: 0,
   });
   db.updateTech('22', 'day1', 12);
   assert.equal(db.snapshot('22', new Date('2026-10-19T00:00:00Z')).tech.day1, 12);
@@ -169,7 +169,7 @@ test('technology panels enforce owner/admin, modal replaces bonus, reset require
   const denied = await commands.handle(command('tech', [{ name: 'update' }]), now);
   assert.match(denied.data.content, /administrator/);
   const panel = await commands.handle(command('tech', [{ name: 'update' }], '8'), now);
-  assert.equal(panel.data.components[0].components[0].options.length, 16);
+  assert.equal(panel.data.components[0].components[0].options.length, 20);
   const component = { ...command('', [], '8'), type: 3, data: { custom_id: 'tech:11:select', values: ['forge'] } };
   assert.equal((await commands.handle(component, now)).type, 9);
   const modal = { ...component, type: 5, data: { custom_id: 'tech:11:save:forge', components: [{ components: [{ custom_id: 'percentage', value: '12%' }] }] } };
@@ -213,12 +213,12 @@ test('reports use private pages, match totals and respect Discord embed limits',
   db.update('22', '11', 'SirMaxeN', { skill_tickets: 9880, skill_cost_x5: 188, mount_keys: 2840, hammers: 11026, pets: 28 }, now);
   const snapshot = db.snapshot('22', now);
   const player = reports.render('player', snapshot, '11', now);
-  assert.match(player.embeds[0].fields[0].name, /^🟢 \*\*/);
-  assert.match(player.embeds[0].fields[1].name, /^⚪/);
+  assert.match(player.embeds.at(-1).fields[0].name, /^🟢 \*\*/);
+  assert.match(player.embeds.at(-1).fields[1].name, /^⚪/);
   const clan = reports.render('clan', snapshot, '11', now);
-  assert.match(reports.render('clan-details', snapshot, '11', now).embeds[0].fields[0].value, /SirMaxeN.*\n> 🕒 \*Aktualizacja: /);
-  assert.equal(clan.embeds[0].fields[0].value.split('\n')[0], player.embeds[0].fields[0].value.split('\n')[0]);
-  assert.match(clan.embeds[0].fields[5].value, /Brak prognozy/);
+  assert.match(reports.render('clan-details', snapshot, '11', now).embeds.at(-1).fields[0].value, /SirMaxeN\*\*\n\u00a0{5}[^\n]+\n\u00a0{5}🕒 \*Aktualizacja: /);
+  assert.equal(clan.embeds.at(-1).fields[0].value.split('\n')[0], player.embeds.at(-1).fields[0].value.split('\n')[0]);
+  assert.match(clan.embeds.at(-1).fields[5].value, /Brak prognozy/);
   for (let i = 0; i < 100; i++) db.update('22', String(i + 100), '*'.repeat(32), { pets: 28 }, now);
   const large = db.snapshot('22', now);
   const check = payload => {
@@ -226,7 +226,7 @@ test('reports use private pages, match totals and respect Discord embed limits',
     const ids = buttons.map(button => button.custom_id);
     assert.equal(new Set(ids).size, ids.length, 'Discord requires unique button identifiers, including disabled buttons');
     assert.ok(ids.every(id => id.length <= 100));
-    const embed = payload.embeds[0];
+    const embed = payload.embeds.at(-1);
     let count = (embed.title?.length ?? 0) + (embed.description?.length ?? 0) + (embed.footer?.text.length ?? 0);
     for (const field of embed.fields ?? []) { assert.ok(field.value.length <= 1024); count += field.name.length + field.value.length; }
     assert.ok(count <= 6000);
@@ -254,24 +254,23 @@ test('reports use private pages, match totals and respect Discord embed limits',
   const ultraMessages = [ultra, ...(ultra.additionalMessages ?? [])];
   for (const message of ultraMessages) {
     check(message);
-    const days = message.embeds[0].fields.map(field => /(?:Dzień|dzień) (\d)/.exec(field.name)?.[1]).filter(Boolean);
-    assert.equal(new Set(days).size, 1, 'Each ultra message must contain only one day, including clan totals');
+    assert.ok(message.embeds.length <= 10);
   }
-  const ultraFields = ultraMessages.flatMap(message => message.embeds[0].fields);
+  const ultraFields = ultraMessages.flatMap(message => message.embeds.flatMap(embed => embed.fields));
   for (let day = 1; day <= 5; day++) {
-    const fields = ultraMessages.filter(message => message.embeds[0].title.includes(`: dzień ${day}`)).flatMap(message => message.embeds[0].fields);
-    assert.equal(fields.reduce((count, field) => count + (field.value.match(/Aktualizacja:/g) ?? []).length, 0), 101);
-    assert.equal(ultraFields.filter(field => field.name === `Suma klanu: dzień ${day}`).length, 1);
+    const start = ultraFields.findIndex(field => field.name.includes('Dzień ' + day + ':'));
+    const end = ultraFields.findIndex(field => field.name === 'Suma klanu: dzień ' + day);
+    assert.equal(ultraFields.slice(start, end).filter(field => field.value.includes('Aktualizacja:')).length, 101);
   }
   const singleUltra = reports.render('clan-ultra', snapshot, '11', now);
   const singleMessages = [singleUltra, ...(singleUltra.additionalMessages ?? [])];
-  assert.equal(singleMessages.length, 1, 'Small ultra reports must stay in one message');
-  const singleFields = singleMessages.flatMap(message => message.embeds[0].fields);
+  assert.ok(singleMessages.every(message => message.embeds.length <= 10));
+  const singleFields = singleMessages.flatMap(message => message.embeds.flatMap(embed => embed.fields));
   for (let day = 1; day <= 5; day++) {
     const field = singleFields.find(item => item.name.includes(`Dzień ${day}:`));
-    const ownLines = player.embeds[0].fields[day - 1].value.split('\n').slice(1, -1).join('\n');
-    assert.ok(field.value.endsWith(ownLines), 'Ultra action points must exactly match the personal report');
-    assert.ok(field.value.startsWith('**SirMaxeN**: **'));
+    const ownLines = player.embeds.at(-1).fields[day - 1].value.split('\n').slice(1, -1).join('\n');
+    assert.ok(field.value.replace(/^\u00a0{5}/gm, '').endsWith(ownLines), 'Ultra action points must exactly match the personal report');
+    assert.ok(field.value.startsWith('**SirMaxeN**\n' + '\u00a0'.repeat(5) + '**'));
     assert.doesNotMatch(field.value, /[🟦🟪🟧🟨🟫🟩]/u);
   }
   assert.equal(singleFields.filter(field => field.name.includes('Dzień 6:')).length, 1);
@@ -280,7 +279,7 @@ test('reports use private pages, match totals and respect Discord embed limits',
   assert.ok(ultraReply.data.components[0].components[0].custom_id.startsWith('report-days:'));
   const small = reports.render('clan-details', snapshot, '11', now);
   assert.equal(small.additionalMessages, undefined);
-  assert.equal(small.embeds[0].fields.filter(field => field.name.startsWith('Suma klanu:')).length, 5);
+  assert.equal(small.embeds.at(-1).fields.filter(field => field.name.startsWith('Suma klanu:')).length, 5);
   const click = custom_id => ({ ...command(''), type: 3, data: { custom_id } });
   const clicked = await commands.handle(click('report:11:clan-details:0'), now);
   assert.equal(clicked.type, 7);

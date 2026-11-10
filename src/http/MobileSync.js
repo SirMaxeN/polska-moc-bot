@@ -3,11 +3,14 @@ import { WarLists } from './WarLists.js';
 import { ClanRankings } from './ClanRankings.js';
 import { SharedLearning } from './SharedLearning.js';
 import { SharedProfiles } from './SharedProfiles.js';
+import { ClanTech } from '../domain/ClanTech.js';
 import { createHash, randomBytes } from 'node:crypto';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 const pairingAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const fields = ['skill_tickets', 'mount_keys', 'hammers', 'pets', 'mounts', 'skill_cost_x5', 'mount_cost'];
+// Sent by app 1.5.1+ when scanned (each optional): green/red vials, gems, shells, coins — shown only, never scored.
+const extras = ['green_vials', 'gems', 'red_vials', 'shells', 'coins'];
 
 export class MobileError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -104,8 +107,8 @@ export class MobileSync {
         typeof body.observed_at !== 'string' || !Number.isFinite(Date.parse(body.observed_at)) ||
         Math.abs(this.clock() - Date.parse(body.observed_at)) > 30 * 60000) throw new MobileError(400, 'Skan jest nieprawidłowy lub ma ponad 30 minut.');
     const values = body.values;
-    if (!values || typeof values !== 'object' || Array.isArray(values) || Object.keys(values).sort().join(',') !== [...fields].sort().join(',')) throw new MobileError(400, 'Wymagane jest siedem wartości zasobów i kosztów.');
-    for (const key of fields) if (!Number.isSafeInteger(values[key]) || values[key] < 0 || values[key] > 9_000_000_000_000 ||
+    if (!values || typeof values !== 'object' || Array.isArray(values) || !fields.every(key => key in values) || Object.keys(values).some(key => !fields.includes(key) && !extras.includes(key))) throw new MobileError(400, 'Wymagane jest siedem wartości zasobów i kosztów.');
+    for (const key of [...fields, ...extras.filter(key => key in values)]) if (!Number.isSafeInteger(values[key]) || values[key] < 0 || values[key] > 9_000_000_000_000 ||
       (['skill_cost_x5', 'mount_cost'].includes(key) && values[key] === 0)) throw new MobileError(400, 'Nieprawidłowa wartość zasobu lub kosztu.');
     const previous = this.database.db.prepare('SELECT response FROM mobile_requests WHERE device=? AND id=? AND expires>?').get(device.hash, body.request_id, this.clock());
     if (previous) return JSON.parse(previous.response);
@@ -135,7 +138,7 @@ export class MobileSync {
   }
 
   async receive(request, response, path, send) {
-    const match = path.match(/^(?:\/discord\/botyslaw-smith)?\/mobile\/(pair|resources|war-status|war-list|war-test|clan-ranking|learning|profiles)$/);
+    const match = path.match(/^(?:\/discord\/botyslaw-smith)?\/mobile\/(pair|resources|war-status|war-list|war-test|war-brawl|clan-ranking|tech|clan-tech|learning|profiles)$/);
     if (!match) return false;
     try {
       if (request.method !== 'POST') throw new MobileError(405, 'Method not allowed');
@@ -145,7 +148,7 @@ export class MobileSync {
       const chunks = []; let length = 0;
       for await (const chunk of request) {
         length += chunk.length;
-        if (length > (['war-list','war-test','clan-ranking','profiles'].includes(match[1]) ? 2*1024*1024 : match[1]==='learning' ? 512*1024 : 4096)) throw new MobileError(413, 'Request too large');
+        if (length > (['war-list','war-test','war-brawl','clan-ranking','profiles'].includes(match[1]) ? 2*1024*1024 : match[1]==='learning' ? 512*1024 : ['tech','clan-tech'].includes(match[1]) ? 64*1024 : 4096)) throw new MobileError(413, 'Request too large');
         chunks.push(chunk);
       }
       let body;
@@ -158,13 +161,21 @@ export class MobileSync {
         // A first upload without overwrite must also learn the role, otherwise management gets "blocked" instead of the update prompt.
         const needsRole=match[1]==='war-status'||match[1]==='war-list';
         const device={...paired,manager:needsRole?await this.isManager(paired.guild_id,paired.user_id).catch(()=>false):false};
-        try {result=match[1]==='war-status'?{...this.warLists.status(device),...this.clanRankings.status(device.guild_id)}:this.warLists.save(device,body,match[1]==='war-test');}catch(e){throw new MobileError(409,e.message);}
+        try {result=match[1]==='war-status'?{...this.warLists.status(device),...this.clanRankings.status(device.guild_id)}:this.warLists.save(device,body,match[1]==='war-test'||(match[1]==='war-brawl'&&body.test_mode===true),match[1]==='war-brawl');}catch(e){throw new MobileError(409,e.message);}
         // Only the first locked Sunday list (enemy tech scanned) is announced; previews and retries are silent.
         if(match[1]==='war-list'&&result.created){const {created,...reply}=result;result=reply;void this.announcer?.send(device.guild_id,result.war_day,null,this.listMessages(device.guild_id));}
         else if(match[1]==='war-list'&&result.updated){if(body.notify!==false)void this.announcer?.send(device.guild_id,result.war_day,body.request_id,this.listMessages(device.guild_id));}
         else if(result.created){const {created,...reply}=result;result=reply;}}
       else if(match[1]==='learning') {this.authenticate(request.headers.authorization);result=this.learning.sync(body);}
       else if(match[1]==='profiles') {const device=this.authenticate(request.headers.authorization);result=this.sharedProfiles.exchange(device,body);}
+      else if(['tech','clan-tech'].includes(match[1])) {
+        const device=this.authenticate(request.headers.authorization);
+        if(!await this.isManager(device.guild_id,device.user_id).catch(()=>false))throw new MobileError(403,'Technologię klanu może aktualizować zarząd.');
+        let payload;try {payload=ClanTech.validate(body,this.clock());}catch(e){throw new MobileError(400,e.message);}
+        if(!Object.keys(ClanTech.values(payload)).length)throw new MobileError(400,'Brak potwierdzonych bonusów technologii.');
+        const nodes=this.database.saveClanTech(device.guild_id,device.user_id,payload,new Date(this.clock()));
+        result={status:'saved',nodes};
+      }
       else if(match[1]==='clan-ranking') {const device=this.authenticate(request.headers.authorization);try {result=this.clanRankings.save(device,body);}catch(e){throw new MobileError(409,e.message);}}
       else result = match[1] === 'pair' ? this.pair(body) : this.update(request.headers.authorization, body);
       send(response, 200, result);

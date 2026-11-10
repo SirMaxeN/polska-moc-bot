@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { WarReport } from '../discord/WarReport.js';
-import { planHybridWar,validateSimulation } from '../domain/WarSimulation.js';
+import { planHybridWar,validateProfiles,validateSimulation } from '../domain/WarSimulation.js';
+import { simulateClanBrawl } from '../domain/ClanBrawl.js';
 import { battleWindow,matchWar,validateRoster } from '../domain/WarPreparation.js';
 export class WarLists {
- constructor(database,clock=()=>Date.now()) {this.database=database;this.clock=clock;database.db.exec('CREATE TABLE IF NOT EXISTS war_lists(guild_id TEXT NOT NULL,war_day TEXT NOT NULL,request_id TEXT NOT NULL,author TEXT NOT NULL,created_at TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(guild_id,war_day))');}
+ constructor(database,clock=()=>Date.now()) {this.database=database;this.clock=clock;database.db.exec('CREATE TABLE IF NOT EXISTS war_lists(guild_id TEXT NOT NULL,war_day TEXT NOT NULL,request_id TEXT NOT NULL,author TEXT NOT NULL,created_at TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(guild_id,war_day)); CREATE TABLE IF NOT EXISTS war_brawls(guild_id TEXT NOT NULL, preview INTEGER NOT NULL, observed_at INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(guild_id,preview))');}
  current(device,testMode=false) {const day=testMode?"TEST":battleWindow(new Date(this.clock()));if(!day) throw new Error('Lista wojenna dostępna od niedzieli 01:00 do poniedziałku 01:00 (Polska).');return {day,row:this.database.db.prepare('SELECT * FROM war_lists WHERE guild_id=? AND war_day=?').get(device.guild_id,day)};}
  /** What the app shows before a scan: is the Sunday list already taken, and when was the visible list last saved. */
  status(device) {
@@ -16,7 +17,7 @@ export class WarLists {
   const shown=real??(preview&&Date.parse(preview.created_at)>=weekStart?preview:null);
   return {war_day:day,locked:!!real,reason:real?'Lista na tę wojnę została już utworzona. Nie nadpisujemy jej.':null,list_updated_at:shown?.created_at??null,list_sunday:!!real,can_override:device.manager===true};
  }
- save(device,body,testMode=false) {
+ save(device,body,testMode=false,brawlOnly=false) {
   const {day}=this.current(device,testMode);
   // A Sunday preview (management, "Tylko podgląd") keeps the real enemy tech; weekday previews assume ours.
   if(testMode)body={...body,war_day:day,enemy_bonus:body?.real_tech===true?body.enemy_bonus:body?.own_bonus,test_mode:true};
@@ -33,20 +34,30 @@ export class WarLists {
   if(signature(ours)===signature(enemies))throw new Error('Listy członków są identyczne. Zeskanuj klan przeciwników.');
   const boost=x=>{if(!x||![x.damage,x.health].every(v=>Number.isFinite(v)&&v>=0&&v<=100000))throw new Error('Brak bonusów wojennych.');return Math.sqrt((1+x.damage/100)*(1+x.health/100));};
   const ownBoost=boost(body.own_bonus),enemyBoost=boost(body.enemy_bonus);
+  if(brawlOnly){
+   const oursProfiles=validateProfiles(body.profiles?.ours,ours,this.clock());
+   const enemyProfiles=validateProfiles(body.profiles?.enemies,enemies,this.clock());
+   const brawl=simulateClanBrawl(oursProfiles,enemyProfiles,body.own_bonus,body.enemy_bonus);
+   if(brawl){
+    const payload={brawl,own_clan:body.own_clan,enemy_clan:body.enemy_clan,own_bonus:body.own_bonus,enemy_bonus:body.enemy_bonus,equalTech:testMode&&body.real_tech!==true};
+    this.database.db.prepare('INSERT INTO war_brawls VALUES(?,?,?,?) ON CONFLICT(guild_id,preview) DO UPDATE SET observed_at=excluded.observed_at,payload=excluded.payload WHERE excluded.observed_at>=war_brawls.observed_at').run(device.guild_id,Number(testMode),Date.parse(body.observed_at),JSON.stringify(payload));
+   }
+   return {status:'simulated',brawl};
+  }
   const plan=body.simulation?planHybridWar(validateSimulation(body,ours,enemies,this.clock(),{allowUnknown:true}),ours,enemies,body.own_bonus,body.enemy_bonus):matchWar(ours,enemies,ownBoost,enemyBoost);
   return this.database.transaction(()=>{
    const old=this.database.db.prepare('SELECT * FROM war_lists WHERE guild_id=? AND war_day=?').get(device.guild_id,day);
    if(old && !testMode) {
-    if(old.request_id===body.request_id)return {status:'saved',war_day:day};
+    if(old.request_id===body.request_id)return {status:'saved',war_day:day,brawl:JSON.parse(old.payload).plan?.brawl??null};
     // Only management may replace the Sunday list, and only after confirming in the app.
     if(!(body.overwrite===true&&device.manager===true))throw new Error(device.manager?'Lista na tę wojnę już istnieje. Potwierdź aktualizację w aplikacji.':'Lista na tę wojnę już istnieje. Zapis został zablokowany.');
     this.database.db.prepare('DELETE FROM war_lists WHERE guild_id=? AND war_day=?').run(device.guild_id,day);
     this.database.db.prepare('INSERT INTO war_lists VALUES(?,?,?,?,?,?)').run(device.guild_id,day,body.request_id,device.user_id,new Date(this.clock()).toISOString(),JSON.stringify({...body,plan}));
-    return {status:'saved',war_day:day,updated:true};
+    return {status:'saved',war_day:day,updated:true,brawl:plan.brawl??null};
    }
    if(testMode)this.database.db.prepare('DELETE FROM war_lists WHERE guild_id=? AND war_day=?').run(device.guild_id,day);
    this.database.db.prepare('INSERT INTO war_lists VALUES(?,?,?,?,?,?)').run(device.guild_id,day,body.request_id,device.user_id,new Date(this.clock()).toISOString(),JSON.stringify({...body,plan}));
-   return {status:'saved',war_day:day,created:true};
+   return {status:'saved',war_day:day,created:true,brawl:plan.brawl??null};
   });
  }
  /** One war list: the locked Sunday list during the war window, otherwise the latest repeatable list with equal bonuses. */
@@ -89,12 +100,24 @@ export class WarLists {
   */
  report(guildId,userId,now,page=0,previewMode=false) {
   const empty=content=>({content,embeds:[],components:[],attachments:[],allowed_mentions:{parse:[]}});
-  if(previewMode) {
-   const row=this.preview(guildId);
-   return row?WarReport.render(row,userId,page,true):empty('Brak listy poglądowej w tym tygodniu. Uruchom „Odczyt listy wojennej” w aplikacji przed niedzielą.');
+  const row=previewMode?this.preview(guildId):this.official(guildId);
+  const calendar=this.database.calendar;
+  const weekStart=calendar?calendar.boundary(calendar.cycle(new Date(this.clock())).monday).getTime():-Infinity;
+  const estimates=this.database.db.prepare('SELECT * FROM war_brawls WHERE guild_id=? AND observed_at>=? ORDER BY (preview=?) DESC, observed_at DESC').all(guildId,Number.isFinite(weekStart)?weekStart:0,Number(previewMode));
+  if(row){
+   const payload=JSON.parse(row.payload);
+   const sameBonus=(a,b)=>a.damage===b.damage&&a.health===b.health;
+   const estimate=estimates.filter(x=>x.observed_at>=Date.parse(row.created_at)).map(x=>JSON.parse(x.payload)).find(x=>x.own_clan===payload.own_clan&&x.enemy_clan===payload.enemy_clan&&sameBonus(x.own_bonus,payload.own_bonus)&&sameBonus(x.enemy_bonus,payload.enemy_bonus)&&x.equalTech===(payload.test_mode===true&&payload.real_tech!==true));
+   if(estimate)payload.plan.brawl=estimate.brawl;
+   return WarReport.render({...row,payload:JSON.stringify(payload)},userId,page,previewMode);
   }
-  const row=this.official(guildId);
-  if(row)return WarReport.render(row,userId,page,false);
+  if(estimates.length){
+   const result=JSON.parse(estimates[0].payload);
+   return {...empty(''),embeds:[{title:'🏆 Symulacja bitki',color:0x61d6ac,description:`**${WarReport.clean(result.own_clan)}** vs **${WarReport.clean(result.enemy_clan)}**\n${result.equalTech?'Podgląd · założono równą technologię obu klanów.':'Na podstawie odczytanej technologii obu klanów.'}\n\n${WarReport.brawlLine(result.brawl)}`}]};
+  }
+  if(previewMode) {
+   return empty('Brak listy poglądowej w tym tygodniu. Uruchom „Odczyt listy wojennej” lub „Symulacja bitki” w aplikacji.');
+  }
   if(!battleWindow(new Date(this.clock())))return empty('⏳ Lista wojenna pojawi się w niedzielę. Czekaj na niedzielny update listy.');
   return empty('Nie utworzono jeszcze niedzielnej listy wojennej. Uruchom „Odczyt listy wojennej” w aplikacji.');
  }
