@@ -7,7 +7,7 @@ export class Deployment {
   static session = 'srv80270@h51.seohost.pl';
   static remoteRoot = '/discord_bots/botyslaw_smith/app'; // FTP home is already /home/srv80270.
   static healthUrl = 'https://komars.eu/discord/botyslaw-smith/health';
-  static runtimeFiles = ['app.js', 'startup.cjs', 'bootstrap.cjs', 'package.json', 'config/initial-tech.json',
+  static runtimeFiles = ['app.js', 'startup.cjs', 'bootstrap.cjs', 'package.json', 'config/initial-tech.json', 'config/supporters.json',
     'scripts/maintenance.js', 'scripts/WorkerRestart.js', 'scripts/register.js', 'assets/bot-banner.png'];
 
   constructor(projectRoot, options = {}) {

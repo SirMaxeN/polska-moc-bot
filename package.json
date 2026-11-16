@@ -13,6 +13,9 @@
     "deploy": "node scripts/deploy.js",
     "maintenance": "node --env-file-if-exists=.env scripts/maintenance.js",
     "backup": "node --env-file-if-exists=.env scripts/maintenance.js --backup",
+    "diagnostics": "node --env-file-if-exists=.env scripts/diagnostics.js",
+    "diagnostics:pull": "node scripts/pull-diagnostics.js",
+    "supporters": "node scripts/push-supporters.js",
     "check:repo": "node scripts/RepositoryAudit.js"
   }
 }

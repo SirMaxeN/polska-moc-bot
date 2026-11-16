@@ -3,6 +3,8 @@ import { WarLists } from './WarLists.js';
 import { ClanRankings } from './ClanRankings.js';
 import { SharedLearning } from './SharedLearning.js';
 import { SharedProfiles } from './SharedProfiles.js';
+import { ScanDiagnostics } from './ScanDiagnostics.js';
+import { Supporters } from './Supporters.js';
 import { ClanTech } from '../domain/ClanTech.js';
 import { createHash, randomBytes } from 'node:crypto';
 
@@ -18,7 +20,8 @@ export class MobileError extends Error {
 
 /** Device credentials are scoped to one Discord member and guild; only hashes are persisted. */
 export class MobileSync {
-  constructor(database, scoring, { clock = () => Date.now(), announcer = null, isManager = async () => false } = {}) {
+  constructor(database, scoring, { clock = () => Date.now(), announcer = null, isManager = async () => false, diagnosticsDirectory = null,
+    supportersPath = new URL('../../config/supporters.json', import.meta.url) } = {}) {
     this.database = database;
     this.announcer = announcer;
     this.isManager = isManager;
@@ -28,6 +31,8 @@ export class MobileSync {
     this.clanRankings = new ClanRankings(database,clock);
     this.learning = new SharedLearning(database,clock);
     this.sharedProfiles = new SharedProfiles(database,clock);
+    this.diagnostics = new ScanDiagnostics(database,clock,diagnosticsDirectory);
+    this.supporters = new Supporters(supportersPath);
     this.limits = new Map();
     database.db.exec(`
       CREATE TABLE IF NOT EXISTS mobile_pairings(hash TEXT PRIMARY KEY,guild_id TEXT NOT NULL,user_id TEXT NOT NULL,name TEXT NOT NULL,expires INTEGER NOT NULL);
@@ -138,7 +143,18 @@ export class MobileSync {
   }
 
   async receive(request, response, path, send) {
-    const match = path.match(/^(?:\/discord\/botyslaw-smith)?\/mobile\/(pair|resources|war-status|war-list|war-test|war-brawl|clan-ranking|tech|clan-tech|learning|profiles)$/);
+    if (/^(?:\/discord\/botyslaw-smith)?\/mobile\/supporters$/.test(path)) {
+      // Public, no account needed: the names are shown to everyone on the app's start screen.
+      try {
+        if (request.method !== 'GET') throw new MobileError(405, 'Method not allowed');
+        this.rateLimit(request.socket.remoteAddress, 'supporters');
+        send(response, 200, this.supporters.read());
+      } catch (error) {
+        send(response, error instanceof MobileError ? error.status : 500, { error: error instanceof MobileError ? error.message : 'Lista niedostępna.' });
+      }
+      return true;
+    }
+    const match = path.match(/^(?:\/discord\/botyslaw-smith)?\/mobile\/(pair|resources|war-status|war-list|war-test|war-brawl|clan-ranking|tech|clan-tech|learning|profiles|diagnostics)$/);
     if (!match) return false;
     try {
       if (request.method !== 'POST') throw new MobileError(405, 'Method not allowed');
@@ -148,7 +164,7 @@ export class MobileSync {
       const chunks = []; let length = 0;
       for await (const chunk of request) {
         length += chunk.length;
-        if (length > (['war-list','war-test','war-brawl','clan-ranking','profiles'].includes(match[1]) ? 2*1024*1024 : match[1]==='learning' ? 512*1024 : ['tech','clan-tech'].includes(match[1]) ? 64*1024 : 4096)) throw new MobileError(413, 'Request too large');
+        if (length > (['war-list','war-test','war-brawl','clan-ranking','profiles'].includes(match[1]) ? 2*1024*1024 : ['learning','diagnostics'].includes(match[1]) ? 512*1024 : ['tech','clan-tech'].includes(match[1]) ? 64*1024 : 4096)) throw new MobileError(413, 'Request too large');
         chunks.push(chunk);
       }
       let body;
@@ -167,6 +183,7 @@ export class MobileSync {
         else if(match[1]==='war-list'&&result.updated){if(body.notify!==false)void this.announcer?.send(device.guild_id,result.war_day,body.request_id,this.listMessages(device.guild_id));}
         else if(result.created){const {created,...reply}=result;result=reply;}}
       else if(match[1]==='learning') {this.authenticate(request.headers.authorization);result=this.learning.sync(body);}
+      else if(match[1]==='diagnostics') {const device=this.authenticate(request.headers.authorization);try {result=this.diagnostics.save(device,body);}catch(e){throw new MobileError(400,e.message);}}
       else if(match[1]==='profiles') {const device=this.authenticate(request.headers.authorization);result=this.sharedProfiles.exchange(device,body);}
       else if(['tech','clan-tech'].includes(match[1])) {
         const device=this.authenticate(request.headers.authorization);
