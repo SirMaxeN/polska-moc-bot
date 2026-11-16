@@ -165,7 +165,7 @@ export class CommandService {
           if (sub?.name === 'donations') return this.reply(this.donationReport(guildId,userId,now));
           if (sub?.name === 'clan-ranking') {
             if (!this.mobile) throw new UserInputError('Ranking klanu jest niedostępny.');
-            return this.warReportReply(this.mobile.clanRankings.report(guildId),interaction);
+            return this.warReportReply(this.mobile.clanRankings.report(guildId,userId),interaction);
           }
           if (['war-list','war-test','war-list-preview'].includes(sub?.name)) {
             if (!this.mobile) throw new UserInputError('Lista wojenna nie jest dostępna.');
@@ -207,6 +207,13 @@ export class CommandService {
         }
         const [kind, owner, action, rawPage] = interaction.data.custom_id.split(':');
         if (owner !== userId) throw new UserInputError('Ten panel należy do innego gracza.');
+        if (kind === 'ranking-copy' && interaction.type === 3) {
+          if (!this.mobile || action !== 'show' || !/^[a-f0-9-]{36}$/i.test(rawPage ?? '')) throw new UserInputError('Ranking klanu jest niedostępny.');
+          const view = this.mobile.clanRankings.report(guildId, userId, rawPage, true);
+          if (!view.chunks) return this.reply(view);
+          const [first, ...rest] = view.chunks;
+          return { response: this.reply(first), followUps: rest.map(chunk => this.reply(chunk).data) };
+        }
         if (kind === 'resource-pick' && interaction.type === 3) {
           if (rawPage !== this.database.calendar.cycle(now).id) throw new UserInputError('Panel wygasł. Otwórz raport ponownie.');
           const keys = interaction.data.values;
@@ -243,7 +250,7 @@ export class CommandService {
           if (action === 'donations') return this.reply(this.donationReport(guildId,userId,now),7);
           if (action === 'clan-ranking') {
             if (!this.mobile) throw new UserInputError('Ranking klanu jest niedostępny.');
-            return this.warReportReply(this.mobile.clanRankings.report(guildId),interaction,7);
+            return this.warReportReply(this.mobile.clanRankings.report(guildId,userId, /^[0-2]$/.test(rawPage ?? "") ? Number(rawPage) : 0),interaction,7);
           }
           if (action === 'missing') return this.missingReport(interaction, now);
           if (action === 'participants') return this.reply(ServerSetup.participationPanel(userId, guildId, this.database), 7);
@@ -361,7 +368,7 @@ export class CommandService {
           }
           if (action === 'clan-ranking') {
             if (!this.mobile) throw new UserInputError('Ranking klanu jest niedostępny.');
-            return this.warReportReply(this.mobile.clanRankings.report(guildId),interaction,7);
+            return this.warReportReply(this.mobile.clanRankings.report(guildId,userId, /^[0-2]$/.test(rawPage ?? "") ? Number(rawPage) : 0),interaction,7);
           }
           if (action === 'donations') return this.reply(this.donationReport(guildId,userId,now),7);
           if (action === 'clan-tech') return this.reply({content:this.techView(snapshot().tech),embeds:[],components:Navigation.all(userId)},7);

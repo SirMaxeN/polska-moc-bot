@@ -5,7 +5,7 @@
 export class SharedLearning {
   // Each skill has four artworks (no star, Mega, Ultra, Apex): keep several samples of each.
   static ICONS_PER_SKILL = 12;
-  static SAMPLES_PER_DIGIT = 40;
+  static SAMPLES_PER_DIGIT = 96;
   constructor(database, clock = () => Date.now()) {
     this.db = database.db; this.clock = clock;
     this.db.exec(`
@@ -35,7 +35,7 @@ export class SharedLearning {
         const aspect = Number(item?.aspect);
         if (!Number.isInteger(item?.digit) || item.digit < 0 || item.digit > 9 || !Number.isFinite(aspect) || aspect <= 0 || aspect > 5 || !/^[01]{140}$/.test(item?.bits ?? '')) continue;
         if (saveDigit.run(item.digit, aspect, item.bits, now).changes) {
-          this.db.prepare(`DELETE FROM learned_digits WHERE digit=? AND bits NOT IN (SELECT bits FROM learned_digits WHERE digit=? ORDER BY created_at DESC LIMIT ?)`)
+          this.db.prepare(`DELETE FROM learned_digits WHERE digit=? AND bits NOT IN (SELECT bits FROM learned_digits WHERE digit=? ORDER BY created_at DESC, rowid DESC LIMIT ?)`)
             .run(item.digit, item.digit, SharedLearning.SAMPLES_PER_DIGIT);
         }
       }
@@ -45,7 +45,7 @@ export class SharedLearning {
     return {
       now,
       icons: this.db.prepare('SELECT type,hash,icon FROM learned_icons WHERE created_at>? ORDER BY created_at').all(since),
-      digits: this.db.prepare('SELECT digit,aspect,bits FROM learned_digits WHERE created_at>? ORDER BY created_at').all(since),
+      digits: this.db.prepare('SELECT digit,aspect,bits FROM learned_digits WHERE created_at>? ORDER BY created_at, rowid').all(since),
     };
   }
 }

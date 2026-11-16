@@ -20,6 +20,18 @@ test('shared learning keeps a few icons per skill, samples per digit and returns
   assert.equal(learning.sync({ since: all.now }).icons.length, 0, 'nothing newer since the last sync');
 });
 
+test('digit storage grows past the old cap and duplicate masks do not displace other samples', t => {
+  const db = new Database(':memory:', new WarCalendar()); t.after(() => db.close());
+  const learning = new SharedLearning(db, () => 1000);
+  const digit = i => ({ digit: 0, aspect: 0.6, bits: i.toString(2).padStart(140, '0') });
+  const limit = SharedLearning.SAMPLES_PER_DIGIT;
+  const samples = Array.from({ length: limit + 1 }, (_, i) => digit(i));
+  learning.sync({ digits: samples.slice(0, 60) });
+  assert.equal(learning.sync({ digits: Array(60).fill(digit(0)) }).digits.length, 60);
+  const result = learning.sync({ digits: samples.slice(60) });
+  assert.deepEqual(result.digits.map(sample => sample.bits), samples.slice(1).map(sample => sample.bits));
+});
+
 test('profiles are shared per Discord server and returned only for the same member and power', t => {
   const db = new Database(':memory:', new WarCalendar()); t.after(() => db.close());
   const now = Date.parse('2026-11-08T12:00:00Z'); const store = new SharedProfiles(db, () => now);
