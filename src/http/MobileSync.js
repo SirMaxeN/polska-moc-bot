@@ -5,6 +5,8 @@ import { SharedLearning } from './SharedLearning.js';
 import { SharedProfiles } from './SharedProfiles.js';
 import { ScanDiagnostics } from './ScanDiagnostics.js';
 import { Supporters } from './Supporters.js';
+import { DeviceLogs } from './DeviceLogs.js';
+import { ServerExport } from './ServerExport.js';
 import { ClanTech } from '../domain/ClanTech.js';
 import { createHash, randomBytes } from 'node:crypto';
 
@@ -33,6 +35,9 @@ export class MobileSync {
     this.sharedProfiles = new SharedProfiles(database,clock);
     this.diagnostics = new ScanDiagnostics(database,clock,diagnosticsDirectory);
     this.supporters = new Supporters(supportersPath);
+    this.deviceLogs = new DeviceLogs(diagnosticsDirectory);
+    this.serverExport = new ServerExport(database, diagnosticsDirectory);
+    this.serverExport.safeWrite(); // ranking data present before this version becomes files at startup
     this.limits = new Map();
     database.db.exec(`
       CREATE TABLE IF NOT EXISTS mobile_pairings(hash TEXT PRIMARY KEY,guild_id TEXT NOT NULL,user_id TEXT NOT NULL,name TEXT NOT NULL,expires INTEGER NOT NULL);
@@ -154,7 +159,7 @@ export class MobileSync {
       }
       return true;
     }
-    const match = path.match(/^(?:\/discord\/botyslaw-smith)?\/mobile\/(pair|resources|war-status|war-list|war-test|war-brawl|clan-ranking|tech|clan-tech|learning|profiles|diagnostics)$/);
+    const match = path.match(/^(?:\/discord\/botyslaw-smith)?\/mobile\/(pair|resources|war-status|war-list|war-test|war-brawl|clan-ranking|tech|clan-tech|learning|profiles|diagnostics|logs)$/);
     if (!match) return false;
     try {
       if (request.method !== 'POST') throw new MobileError(405, 'Method not allowed');
@@ -164,7 +169,7 @@ export class MobileSync {
       const chunks = []; let length = 0;
       for await (const chunk of request) {
         length += chunk.length;
-        if (length > (['war-list','war-test','war-brawl','clan-ranking','profiles'].includes(match[1]) ? 2*1024*1024 : ['learning','diagnostics'].includes(match[1]) ? 512*1024 : ['tech','clan-tech'].includes(match[1]) ? 64*1024 : 4096)) throw new MobileError(413, 'Request too large');
+        if (length > (['war-list','war-test','war-brawl','clan-ranking','profiles'].includes(match[1]) ? 2*1024*1024 : match[1]==='logs' ? 1536*1024 : ['learning','diagnostics'].includes(match[1]) ? 512*1024 : ['tech','clan-tech'].includes(match[1]) ? 64*1024 : 4096)) throw new MobileError(413, 'Request too large');
         chunks.push(chunk);
       }
       let body;
@@ -184,7 +189,8 @@ export class MobileSync {
         else if(result.created){const {created,...reply}=result;result=reply;}}
       else if(match[1]==='learning') {this.authenticate(request.headers.authorization);result=this.learning.sync(body);}
       else if(match[1]==='diagnostics') {const device=this.authenticate(request.headers.authorization);try {result=this.diagnostics.save(device,body);}catch(e){throw new MobileError(400,e.message);}}
-      else if(match[1]==='profiles') {const device=this.authenticate(request.headers.authorization);result=this.sharedProfiles.exchange(device,body);}
+      else if(match[1]==='logs') {const device=this.authenticate(request.headers.authorization);try {result=this.deviceLogs.save(device,body);}catch(e){throw new MobileError(400,e.message);}}
+      else if(match[1]==='profiles') {const device=this.authenticate(request.headers.authorization);result=this.sharedProfiles.exchange(device,body);if(result.saved)this.serverExport.safeWrite();}
       else if(['tech','clan-tech'].includes(match[1])) {
         const device=this.authenticate(request.headers.authorization);
         if(!await this.isManager(device.guild_id,device.user_id).catch(()=>false))throw new MobileError(403,'Technologię klanu może aktualizować zarząd.');
@@ -193,7 +199,7 @@ export class MobileSync {
         const nodes=this.database.saveClanTech(device.guild_id,device.user_id,payload,new Date(this.clock()));
         result={status:'saved',nodes};
       }
-      else if(match[1]==='clan-ranking') {const device=this.authenticate(request.headers.authorization);try {result=this.clanRankings.save(device,body);}catch(e){throw new MobileError(409,e.message);}}
+      else if(match[1]==='clan-ranking') {const device=this.authenticate(request.headers.authorization);try {result=this.clanRankings.save(device,body);}catch(e){throw new MobileError(409,e.message);}this.serverExport.safeWrite();}
       else result = match[1] === 'pair' ? this.pair(body) : this.update(request.headers.authorization, body);
       send(response, 200, result);
     } catch (error) {

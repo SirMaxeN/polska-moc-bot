@@ -9,11 +9,18 @@ export class SharedProfiles {
     this.db = database.db; this.clock = clock;
     this.db.exec(`CREATE TABLE IF NOT EXISTS shared_profiles(guild_id TEXT NOT NULL,enemy INTEGER NOT NULL,clan_key TEXT NOT NULL,name_key TEXT NOT NULL,
       clan TEXT NOT NULL,name TEXT NOT NULL,power REAL NOT NULL,saved_at INTEGER NOT NULL,profile TEXT NOT NULL,PRIMARY KEY(guild_id,enemy,clan_key,name_key))`);
+    // Drop backups saved before the check: they would keep a broken ranking alive for 30 days on every phone.
+    for (const row of this.db.prepare('SELECT rowid,power,profile FROM shared_profiles').all())
+      if (!SharedProfiles.plausible(JSON.parse(row.profile), row.power)) this.db.prepare('DELETE FROM shared_profiles WHERE rowid=?').run(row.rowid);
   }
   static key(value) {
     return String(value ?? '').normalize('NFKD').replace(/\p{M}/gu, '').toLocaleLowerCase('pl').replace(/ł/g, 'l')
       // Clan tags vary in OCR ("PolskaMoc(PLJ", "[_PL_]"): compare the name before the tag.
       .replace(/[\[(].*$/, '').replace(/[^\p{L}\p{N}]/gu, '');
+  }
+  /** Damage/health at half of the power or more is the power read as a stat (2026-11-18 war-day reads). */
+  static plausible(profile, power) {
+    return profile && profile.damage > 0 && profile.health > 0 && profile.damage < power * 0.5 && profile.health < power * 0.5;
   }
   static samePower(a, b) { return a > 0 && b > 0 && Math.abs(a - b) <= Math.max(a, b) * 0.006; }
 
@@ -32,6 +39,7 @@ export class SharedProfiles {
       const clanKey = SharedProfiles.key(item?.clan), nameKey = SharedProfiles.key(item?.name);
       if (!clanKey || !nameKey || !(power > 0) || !Number.isFinite(savedAt) || savedAt > now + 600000 || now - savedAt > SharedProfiles.MAX_AGE) continue;
       if (text.length < 20 || text.length > 65536 || typeof profile.damage !== 'number' || typeof profile.health !== 'number') continue;
+      if (!SharedProfiles.plausible(profile, power)) continue;
       saved += upsert.run(device.guild_id, item.enemy ? 1 : 0, clanKey, nameKey, String(item.clan).slice(0, 100), String(item.name).slice(0, 100), power, savedAt, text).changes;
     }
     const find = this.db.prepare('SELECT power,saved_at,profile FROM shared_profiles WHERE guild_id=? AND enemy=? AND clan_key=? AND name_key=?');
@@ -39,6 +47,7 @@ export class SharedProfiles {
     for (const item of want) {
       const row = find.get(device.guild_id, item?.enemy ? 1 : 0, SharedProfiles.key(item?.clan), SharedProfiles.key(item?.name));
       if (!row || now - row.saved_at > SharedProfiles.MAX_AGE || !SharedProfiles.samePower(row.power, Number(item?.power))) continue;
+      if (!SharedProfiles.plausible(JSON.parse(row.profile), row.power)) continue;
       profiles.push({ enemy: !!item.enemy, clan: item.clan, name: item.name, power: row.power, savedAt: row.saved_at, profile: JSON.parse(row.profile) });
     }
     return { saved, profiles };
