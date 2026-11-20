@@ -57,3 +57,34 @@ test('ranking report lists all fifty players across embeds within Discord limits
  assert.ok(view.embeds.every(e=>e.description.length<=4096));
  assert.ok(view.embeds.reduce((n,e)=>n+e.description.length+(e.title?.length??0),0)<=6000);
 });
+
+test('history is browsed with newer/older buttons that end at the official ranking',t=>{
+ const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());
+ let clock=now;const rankings=new ClanRankings(db,()=>clock);
+ for(let i=0;i<3;i++){const b=body(4+i);b.observed_at=new Date(clock).toISOString();rankings.save({guild_id:'g'},b);clock+=60000;}
+ const buttons=page=>rankings.report('g','u',page).components[0].components;
+ const [newer,older]=buttons(0);
+ assert.equal(newer.label,'◀ Nowszy');assert.equal(newer.disabled,true);
+ assert.equal(older.custom_id,'report:u:clan-ranking:1');assert.equal(older.disabled,false);
+ const middle=buttons(1);
+ assert.equal(middle[0].label,'◀ Nowszy (oficjalny)');assert.equal(middle[0].custom_id,'report:u:clan-ranking:0');
+ assert.equal(middle[1].custom_id,'report:u:clan-ranking:2');
+ const last=buttons(2);
+ assert.equal(last[0].custom_id,'report:u:clan-ranking:1');assert.equal(last[1].disabled,true);
+ assert.ok(new Set(last.map(b=>b.custom_id)).size===last.length);
+ assert.match(rankings.report('g','u',0).embeds[0].description,/Oficjalny ranking/);
+ assert.match(rankings.report('g','u',2).embeds[0].description,/Archiwum 2\/2/);
+});
+
+test('a withdrawn scan is deleted on start and never saved again',t=>{
+ const db=new Database(':memory:',new WarCalendar());t.after(()=>db.close());
+ const id=[...ClanRankings.withdrawn][0];
+ const rankings=new ClanRankings(db,()=>now);
+ const good=body(4);rankings.save({guild_id:'g'},good);
+ const bad=body(4);bad.request_id=id;bad.members[0].name='Inny';bad.profiles=bad.members.map(profile);
+ db.db.prepare('INSERT INTO clan_ranking_history VALUES(?,?,?,?)').run('g',now+1,id,JSON.stringify({clan:'PolskaMoc',rows:[]}));
+ new ClanRankings(db,()=>now);
+ assert.deepEqual(db.db.prepare('SELECT request_id FROM clan_ranking_history').all().map(r=>r.request_id),[good.request_id]);
+ rankings.save({guild_id:'g'},bad);
+ assert.equal(db.db.prepare('SELECT COUNT(*) n FROM clan_ranking_history WHERE request_id=?').get(id).n,0);
+});

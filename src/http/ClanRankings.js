@@ -22,6 +22,9 @@ function sameClan(current,previous) {
 }
 
 export class ClanRankings {
+ // Scans withdrawn by hand. 2026-11-20 16:17 UTC: war-day profiles with the player's power read as damage
+ // (app 1.6.8 header parser) pushed GumowyPrzetyk and others to the top.
+ static withdrawn=new Set(['f2b735c9-80d5-4523-9a81-d6a18449254c']);
  constructor(database,clock) {
   this.db=database.db;
   this.database=database;
@@ -30,6 +33,7 @@ export class ClanRankings {
   this.db.exec(`CREATE TABLE IF NOT EXISTS clan_ranking_history(guild_id TEXT NOT NULL, observed_at INTEGER NOT NULL, request_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(guild_id,request_id));
    INSERT INTO clan_ranking_history SELECT * FROM clan_rankings AS old WHERE NOT EXISTS (SELECT 1 FROM clan_ranking_history WHERE guild_id=old.guild_id);`);
   this.database.transaction(()=>{
+   for(const id of ClanRankings.withdrawn) this.db.prepare('DELETE FROM clan_ranking_history WHERE request_id=?').run(id);
    for(const {guild_id} of this.db.prepare('SELECT DISTINCT guild_id FROM clan_ranking_history').all()) this.prune(guild_id);
   });
  }
@@ -56,7 +60,7 @@ export class ClanRankings {
   const payload=JSON.stringify({clan:body.clan.trim(),rows});
   this.database.transaction(()=>{
    const history=this.history(device.guild_id);
-   if(history.some(scan=>scan.request_id===body.request_id)||observed<(history[0]?.observed_at??0))return;
+   if(ClanRankings.withdrawn.has(body.request_id)||history.some(scan=>scan.request_id===body.request_id)||observed<(history[0]?.observed_at??0))return;
    this.db.prepare('INSERT INTO clan_ranking_history VALUES(?,?,?,?) ON CONFLICT(guild_id,request_id) DO NOTHING').run(device.guild_id,observed,body.request_id,payload);
    this.prune(device.guild_id);
   });
@@ -114,14 +118,17 @@ export class ClanRankings {
    estimated.length?`⚖️ Bez pełnego profilu (oceniani tylko wg mocy): ${estimated.map(p=>WarReport.clean(p.name)).join(', ')}.`:'',
   ].filter(Boolean).join('\n');
   // Every player is listed; lines are packed into embeds within Discord's 4096/6000 character limits.
-  const header=`${method}\n**${selected===0?'Oficjalny ranking':'Archiwum'}** · ${rows.length} graczy · ${simulated}/${pairs} walk z symulacji · <t:${Math.floor(saved.observed_at/1000)}:f>${positions?`\n${rankIcons.up} awans · ${rankIcons.down} spadek · ${rankIcons.same} bez zmian · ${rankIcons.new} nowy w rankingu`:'\nBrak wcześniejszego różnego rankingu tego klanu do porównania.'}\n\n`;
+  const header=`${method}\n**${selected===0?'Oficjalny ranking':`Archiwum ${selected}/${history.length-1} (starszy)`}** · ${rows.length} graczy · ${simulated}/${pairs} walk z symulacji · <t:${Math.floor(saved.observed_at/1000)}:f>${positions?`\n${rankIcons.up} awans · ${rankIcons.down} spadek · ${rankIcons.same} bez zmian · ${rankIcons.new} nowy w rankingu`:'\nBrak wcześniejszego różnego rankingu tego klanu do porównania.'}\n\n`;
   const embeds=[];let current=header,total=0;
   for(const line of lines) {
    if(current.length+line.length+1>4000){embeds.push(current);total+=current.length;current='';}
    current+=(current&&!current.endsWith('\n\n')?'\n':'')+line;
   }
   embeds.push(current);
-  return {allowed_mentions,components:userId?[{type:1,components:[...(history.length>1?history.map((_,index)=>({type:2,style:index===selected?1:2,label:['Oficjalny','Poprzedni','Starszy'][index],custom_id:`report:${userId}:clan-ranking:${index}`,disabled:index===selected})):[]),{type:2,style:2,label:'Kopiuj ranking',emoji:{name:'📋'},custom_id:`ranking-copy:${userId}:show:${saved.request_id}`}]}]:[],
+  return {allowed_mentions,components:userId?[{type:1,components:[...(history.length>1?[
+    {type:2,style:selected>0?1:2,label:selected===1?'◀ Nowszy (oficjalny)':'◀ Nowszy',custom_id:`report:${userId}:clan-ranking:${Math.max(0,selected-1)}`,disabled:selected===0},
+    {type:2,style:2,label:'Starszy ▶',custom_id:`report:${userId}:clan-ranking:${Math.min(history.length-1,selected+1)}`,disabled:selected===history.length-1},
+   ]:[]),{type:2,style:2,label:'Kopiuj ranking',emoji:{name:'📋'},custom_id:`ranking-copy:${userId}:show:${saved.request_id}`}]}]:[],
    embeds:embeds.map((description,i)=>({...(i===0?{title:`🏆 Ranking klanu · ${WarReport.plain(clan)}`}:{}),color:0x61d6ac,description}))};
  }
 }
