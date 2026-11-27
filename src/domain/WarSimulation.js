@@ -34,14 +34,30 @@ export function wilson(wins,trials) {
 }
 export function validateProfiles(data,members,now) {
   if(!Array.isArray(data)||data.length!==members.length)throw new Error('Brak zapisanych profili klanu.');
+  const compactName=name=>nameKey(name).replace(/\s+/gu,'');
+  const nameCounts=new Map();
+  for(const member of members) {
+   const key=compactName(member.name);
+   nameCounts.set(key,(nameCounts.get(key)??0)+1);
+  }
   return data.map((profile,i)=>{
    if(profile===null)return null;
-   if(!profile||typeof profile.name!=='string'||nameKey(profile.name)!==nameKey(members[i].name)||![profile.damage,profile.health].every(x=>Number.isFinite(x)&&x>0&&x<=1e24)||typeof profile.ranged!=='boolean'||typeof profile.mounted!=='boolean'||!Number.isInteger(profile.pets)||profile.pets<0||profile.pets>3||!Number.isFinite(profile.scannedAt)||profile.scannedAt>now+60000||now-profile.scannedAt>PROFILE_MAX_AGE)throw new Error('Nieprawidłowy lub nieaktualny profil gracza.');
-   if(profile.skillsReviewed!==true||!Array.isArray(profile.skills)||profile.skills.length>3||profile.skills.some(s=>!s||!skillTypes.has(s.type)||!Number.isInteger(s.level)||s.level<1||s.level>100)||new Set(profile.skills.map(s=>s.type)).size!==profile.skills.length)throw new Error('Niekompletne umiejętności gracza.');
-   if(!profile.bonuses||typeof profile.bonuses!=='object'||Array.isArray(profile.bonuses)||Object.values(profile.bonuses).some(x=>!Number.isFinite(x)||x<0||x>100000))throw new Error('Nieprawidłowe bonusy profilu.');
-   const fairy=profile.fairy;if(!fairy||(fairy.present!==false&&(!['LORA','MIRA','TIRA'].includes(fairy.type)||!Number.isInteger(fairy.level)||fairy.level<1||fairy.level>20)))throw new Error('Niekompletne dane wróżki.');
-   if(!Number.isFinite(profile.skillMastery??0)||(profile.skillMastery??0)<0||(profile.skillMastery??0)>100000)throw new Error('Nieprawidłowy bonus umiejętności.');
-   return profile;
+   const {name}=members[i];
+   const key=compactName(name);
+   const matches=typeof profile?.name==='string'&&(nameKey(profile.name)===nameKey(name)
+    || (nameCounts.get(key)===1&&compactName(profile.name)===key));
+   if(!matches)throw new Error(`Profil gracza ${name}: ${typeof profile?.name==='string'&&profile.name.trim()?`odczytany nick „${profile.name.slice(0,100)}” nie zgadza się z listą klanu`:'brak nicku w odczytanym profilu'}.`);
+   if(!Number.isFinite(profile.damage)||profile.damage<=0||profile.damage>1e24)throw new Error(`Profil gracza ${name}: nieprawidłowe łączne obrażenia.`);
+   if(!Number.isFinite(profile.health)||profile.health<=0||profile.health>1e24)throw new Error(`Profil gracza ${name}: nieprawidłowe łączne zdrowie.`);
+   if(typeof profile.ranged!=='boolean')throw new Error(`Profil gracza ${name}: nie potwierdzono typu broni.`);
+   if(typeof profile.mounted!=='boolean')throw new Error(`Profil gracza ${name}: nie potwierdzono wierzchowca.`);
+   if(!Number.isInteger(profile.pets)||profile.pets<0||profile.pets>3)throw new Error(`Profil gracza ${name}: nieprawidłowa liczba zwierzaków.`);
+   if(!Number.isFinite(profile.scannedAt)||profile.scannedAt>now+60000||now-profile.scannedAt>PROFILE_MAX_AGE)throw new Error(`Profil gracza ${name}: nieprawidłowa lub nieaktualna data skanu.`);
+   if(profile.skillsReviewed!==true||!Array.isArray(profile.skills)||profile.skills.length>3||profile.skills.some(s=>!s||!skillTypes.has(s.type)||!Number.isInteger(s.level)||s.level<1||s.level>100)||new Set(profile.skills.map(s=>s.type)).size!==profile.skills.length)throw new Error(`Profil gracza ${name}: niekompletne umiejętności.`);
+   if(!profile.bonuses||typeof profile.bonuses!=='object'||Array.isArray(profile.bonuses)||Object.values(profile.bonuses).some(x=>!Number.isFinite(x)||x<0||x>100000))throw new Error(`Profil gracza ${name}: nieprawidłowe bonusy.`);
+   const fairy=profile.fairy;if(!fairy||(fairy.present!==false&&(!['LORA','MIRA','TIRA'].includes(fairy.type)||!Number.isInteger(fairy.level)||fairy.level<1||fairy.level>20)))throw new Error(`Profil gracza ${name}: niekompletne dane wróżki.`);
+   if(!Number.isFinite(profile.skillMastery??0)||(profile.skillMastery??0)<0||(profile.skillMastery??0)>100000)throw new Error(`Profil gracza ${name}: nieprawidłowy bonus umiejętności.`);
+   return profile.name===name?profile:{...profile,name};
   });
 }
 export function checkCombatResult(x,first,second) {
@@ -73,7 +89,8 @@ export function validateSimulation(body,ours,enemies,now,{allowUnknown=false}={}
   const main=j>=0?enemies[j].name:null,shared=primary[i]<0&&j>=0,unknown=results[i].some(x=>x.error);
   return {name:player.name,main,shared,alternatives:eligible.filter(x=>x.name!==main).slice(0,3).map(x=>x.name),
    note:shared?'Wspólny cel — brak dostępnej unikalnej pary':main?null:unknown?'Brak pełnej oceny: niekompletne dane lub nieobsługiwany efekt':'Brak celu z przewagą w symulacji',
-   matchups:enemies.map((enemy,j)=>({name:enemy.name,...results[i][j]}))};
+   ranged:a[i]?.ranged,
+   matchups:enemies.map((enemy,j)=>({name:enemy.name,ranged:b[j]?.ranged,...results[i][j]}))};
  });
  const plan={type:'simulation',approximate:true,model:sim.model,experimental:true,method:'Eksperymentalna symulacja walk: wyniki modelu, nie gwarancja wygranej. Przedział 95% opisuje losowość prób, nie błędy modelu.',assignments,
   expectedWins:primary.reduce((sum,j,i)=>sum+(j>=0?matrix[i][j]:0),0),
@@ -97,10 +114,14 @@ export function planHybridWar(plan,ours,enemies,ownBonus,enemyBonus) {
   return enemies.map(({name})=>{
    const fight=fights.get(name),ratio=a.get(player.name)/b.get(name);
    const source=fight?.error?'power':'simulation';
-   const eligible=source==='power'?ratio>=1:fight?.probability>.5;
+   const meleeAgainstRanged=player.ranged===false&&fight?.ranged===true;
+   const rangedPair=player.ranged===true&&fight?.ranged===true;
+   const reliableCrossType=source==='simulation'&&(fight.interval?.[0]??0)>=.90;
+   const eligible=(!meleeAgainstRanged||reliableCrossType)&&(source==='power'?ratio>=1:fight?.probability>.5);
    const quality=source==='power'?Math.min(1,ratio-1):fight?.probability??0;
    const proximity=1-Math.abs(ar.get(player.name)-br.get(name));
-   return {name,source,eligible,quality,priority:quality+.30*proximity};
+   return {name,source,eligible,quality,rangedPair,blocked:meleeAgainstRanged&&!reliableCrossType,
+    priority:quality+.30*proximity};
   });
  });
  const span=2*(ours.length+1);
@@ -108,10 +129,14 @@ export function planHybridWar(plan,ours,enemies,ownBonus,enemyBonus) {
  // Nearby power ranks decide similar matchups and keep stronger allies available for stronger targets.
  // Then give every remaining ally a distinct remaining rival (best available chance), so nobody shares
  // a target while free rivals exist. Favourable pairs always outweigh any number of unfavourable ones.
- const primary=maximumWeightAssignment(options.map(row=>row.map(c=>c.eligible?span*span+(c.source==='simulation'?span:0)+c.priority:(1+c.priority)/(4*span))));
+ const primary=maximumWeightAssignment(options.map(row=>row.map(c=>{
+  if(c.blocked)return 0;
+  if(!c.eligible)return Number(c.source==='simulation'&&c.quality>0)+(1+c.priority)/(4*span);
+  return span**3+(c.source==='simulation'?span**2:0)+(c.rangedPair?span:0)+c.priority;
+ })));
  const assignments=plan.assignments.map((player,i)=>{
-  const choices=options[i].filter(c=>c.eligible).sort((x,y)=>Number(y.source==='simulation')-Number(x.source==='simulation')||y.priority-x.priority||x.name.localeCompare(y.name));
-  const target=options[i][primary[i]]??choices[0]??[...options[i]].sort((x,y)=>y.priority-x.priority)[0];
+  const choices=options[i].filter(c=>c.eligible).sort((x,y)=>Number(y.source==='simulation')-Number(x.source==='simulation')||Number(y.rangedPair)-Number(x.rangedPair)||y.priority-x.priority||x.name.localeCompare(y.name));
+  const target=options[i][primary[i]]??choices[0]??options[i].filter(c=>!c.blocked).sort((x,y)=>y.priority-x.priority)[0];
   return {...player,main:target?.name??null,mainSource:target?.source??null,shared:!!target&&primary[i]<0,
    alternatives:[],eligibleTargets:choices.map(c=>({name:c.name,quality:c.quality,source:c.source})),
    note:target?null:player.matchups.some(r=>r.error)?'Brak celu z przewagą w symulacji lub według mocy':'Brak celu z przewagą w symulacji'};

@@ -22,6 +22,19 @@ test('short report: one line per player with a unique rival, chance or power and
  assert.equal(new Set(targets).size,4,'every player gets a distinct rival');
  assert.match(text,/\*\*Weak\*\* → \*\*[^*]+\*\* \(moc -/);
 });
+test('a zero-win main target shows other opponents the player beat in simulations',()=>{
+ const ours=['Weak','Second','Third','Fourth'].map(name=>({name,power:100}));
+ const enemies=['Zero','Possible','Rare','Unknown'].map(name=>({name,power:100}));
+ const probabilities=[[0,.14,1/1024,null],[0,.9,0,0],[0,0,.9,0],[0,0,0,.9]];
+ const plan={type:'simulation',completeOurs:4,completeEnemies:4,assignments:ours.map(({name},i)=>({
+  name,matchups:enemies.map(({name},j)=>probabilities[i][j]===null
+   ? {name,error:'Brak oceny'} : {name,probability:probabilities[i][j]}),
+ }))};
+ const view=WarReport.render(row(ours,enemies,{plan}),'u');
+ const line=view.embeds.flatMap(e=>e.description.split('\n')).find(line=>line.includes('**Weak**'));
+ assert.match(line,/\*\*Zero\*\* \(0%\) · cele z szansą: Possible 14%, Rare <1%$/);
+ assert.doesNotMatch(line,/Unknown/);
+});
 test('all fifty long unicode names survive Discord limits without attachments',()=>{
  const ours=Array.from({length:50},(_,i)=>({name:`Nasi${i}_${'Ł'.repeat(70)}`,power:1e12+i}));
  const enemies=Array.from({length:50},(_,i)=>({name:`Rywale${i}_${'Ż'.repeat(68)}`,power:1e6+i}));

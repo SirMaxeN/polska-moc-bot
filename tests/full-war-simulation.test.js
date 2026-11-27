@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {createServer} from 'node:http';
-import {maximumExpectedWins,validateSimulation,wilson} from '../src/domain/WarSimulation.js';
+import {maximumExpectedWins,planHybridWar,validateProfiles,validateSimulation,wilson} from '../src/domain/WarSimulation.js';
 import {WarReport} from '../src/discord/WarReport.js';
 import {MobileSync} from '../src/http/MobileSync.js';
 import {Database} from '../src/storage/Database.js';
@@ -15,6 +15,34 @@ function fixture(count=2) {
  return {request_id:randomUUID(),war_day:'TEST',observed_at:new Date(now).toISOString(),ours,enemies,our_count:count,enemy_count:count,own_clan:'Nasz klan',enemy_clan:'Rywal',own_bonus:{damage:8700,health:7700},enemy_bonus:{damage:8700,health:7700},profiles:{ours:ours.map(profile),enemies:enemies.map(profile)},simulation:{model:'pvp-full-v1',experimental:true,matrix:ours.flatMap((_,ally)=>enemies.map((_,enemy)=>({ally,enemy,wins:enemy===ally?800:600,losses:enemy===ally?224:424,draws:0,trials:1024})))}};
 }
 const plan=body=>validateSimulation(body,body.ours,body.enemies,now);
+test('legacy profiles missing a space keep the unique roster name',()=>{
+ const b=fixture();
+ b.ours[0].name='Gumowy Przetyk';
+ b.profiles.ours[0].name='GumowyPrzetyk';
+ assert.equal(validateProfiles(b.profiles.ours,b.ours,now)[0].name,'Gumowy Przetyk');
+ b.ours[1].name='GumowyPrzetyk';
+ assert.throws(()=>validateProfiles(b.profiles.ours,b.ours,now),/Gumowy Przetyk.*nick/);
+});
+test('rejected profiles identify the roster member and the failed field',()=>{
+ const b=fixture();
+ b.profiles.ours[1].health=0;
+ assert.throws(()=>plan(b),/Profil gracza Nasz1: nieprawidłowe łączne zdrowie/);
+ b.profiles.ours[1].name='Different';
+ assert.throws(()=>plan(b),/Profil gracza Nasz1: odczytany nick „Different”/);
+});
+test('war prefers ranged mirrors and only offers a ranged rival to melee with strong evidence',()=>{
+ const b=fixture();
+ b.profiles.ours[0].ranged=true;
+ b.profiles.enemies[1].ranged=true;
+ const assign=()=>planHybridWar(plan(b),b.ours,b.enemies,b.own_bonus,b.enemy_bonus).assignments;
+ const preferred=assign();
+ assert.equal(preferred[0].main,'Rywal1');
+ assert.equal(preferred[1].main,'Rywal0');
+ assert.ok(!preferred[1].alternatives.includes('Rywal1'));
+ const strong=b.simulation.matrix.find(m=>m.ally===1&&m.enemy===1);
+ Object.assign(strong,{wins:1024,losses:0});
+ assert.ok(assign()[1].alternatives.includes('Rywal1'));
+});
 test('global probabilities beat independent greedy picks and never reuse main targets',()=>{
  assert.deepEqual(maximumExpectedWins([[.90,.89],[.88,.01]]),[1,0]);
  assert.deepEqual(maximumExpectedWins([[null,.5],[.2,.1]]),[-1,-1]);
@@ -98,8 +126,9 @@ test('rivals out of everyone\'s reach make reserves only when the 45-defeat rese
  };
  const tough=report(48,3);
  assert.equal((tough.match(/^🔁 \*\*/gm)??[]).length,3,'48 rivals: three can be skipped and all three are out of reach');
- assert.match(tough,/Rezerwa \(3\): do resetu listy wystarczy pokonać 45 rywali/);
- assert.match(tough,/rezerwa \(Rywal4[567] poza zasięgiem, [0-9,]+%\) · dobij: /);
+ assert.match(tough,/Unikalne pary z szansą ≥50%: \*\*45\/45 do resetu\*\*/);
+ assert.match(tough,/Rezerwa \(3\).*poniżej 25%: Rywal45, Rywal46, Rywal47/);
+ assert.match(tough,/rezerwa · dobij: /);
  const easy=report(48,0);
  assert.doesNotMatch(easy,/🔁/,'nobody is out of reach: no reserves');
  const small=report(4,1);

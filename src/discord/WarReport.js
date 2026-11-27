@@ -30,28 +30,37 @@ export class WarReport {
  /** The assignments every view shares (report, ping, /copy): unique rivals, leftovers by power, reserves. */
  static compute(row) {
   const p=JSON.parse(row.payload),simulated=p.plan.type==='simulation';
-  const plan=simulated?planHybridWar(p.plan,p.ours,p.enemies,p.own_bonus,p.enemy_bonus):rebalanceWarAlternatives(p.plan,p.ours,p.enemies,p.own_bonus,p.enemy_bonus);
-  // Everyone gets a distinct rival while free rivals remain: leftovers take the best free one by power.
+  const bestByEnemy=new Map(p.enemies.map(enemy=>[enemy.name,{best:0,known:0}]));
+  if(simulated)for(const assignment of p.plan.assignments)for(const fight of assignment.matchups??[]) {
+   const summary=bestByEnemy.get(fight.name);
+   if(summary&&!fight.error&&Number.isFinite(fight.probability)) {
+    summary.best=Math.max(summary.best,fight.probability);
+    summary.known++;
+   }
+  }
+  // Choose omitted rivals before assigning allies, so a player is not relegated to reserve by an omitted target.
+  const skippable=Math.min(5,Math.max(0,p.enemies.length-45));
+  const tooStrong=simulated&&skippable?p.enemies.map(({name})=>({name,...bestByEnemy.get(name)}))
+   .filter(e=>e.known===p.ours.length&&e.best<.25).sort((x,y)=>x.best-y.best).slice(0,skippable):[];
+  const skip=new Set(tooStrong.map(e=>e.name));
+  const targets=p.enemies.filter(e=>!skip.has(e.name));
+  const plan=simulated?planHybridWar(p.plan,p.ours,targets,p.own_bonus,p.enemy_bonus):rebalanceWarAlternatives(p.plan,p.ours,targets,p.own_bonus,p.enemy_bonus);
+  // Power-only lists keep one distinct slot per ally while rivals remain available.
   const taken=new Set(plan.assignments.filter(a=>a.main&&!a.shared).map(a=>a.main));
-  for(const a of plan.assignments)if(!a.main||a.shared) {
-   const free=p.enemies.filter(e=>!taken.has(e.name)).sort((x,y)=>x.power-y.power)[0];
+  for(const a of plan.assignments)if(!simulated&&(!a.main||a.shared)) {
+   const free=targets.filter(e=>!taken.has(e.name)).sort((x,y)=>x.power-y.power)[0];
    if(free){a.main=free.name;a.shared=false;a.mainSource='power';taken.add(free.name);}
   }
-  // War rules (GuildWarConfig): 5 attacks each, and the defeated list resets after 45 rivals, so up to
-  // (rivals − 45, max 5) of the strongest need not be beaten. Only a rival out of everyone's reach
-  // (best simulated chance below 25%) is skipped; its assigned player becomes a reserve for retries.
-  const skippable=Math.min(5,Math.max(0,p.enemies.length-45));
-  const bestChance=name=>Math.max(0,...plan.assignments.map(a=>a.matchups?.find(m=>m.name===name&&!m.error)?.probability??0));
-  const tooStrong=simulated&&skippable?p.enemies.map(e=>({name:e.name,best:bestChance(e.name)})).filter(e=>e.best<.25).sort((x,y)=>x.best-y.best).slice(0,skippable):[];
-  return {p,plan,simulated,tooStrong,skip:new Set(tooStrong.map(e=>e.name))};
+  const reserve=assignment=>skip.size>0&&(!assignment.main||assignment.shared);
+  return {p,plan,simulated,tooStrong,skip,reserve,bestByEnemy};
  }
  /**
   * In-game chat copy: "Player → Rival" (main targets only, no description), packed into messages of at
   * most `limit` characters (in-game chat limit: 280) without splitting a player's line.
   */
  static copyChunks(row,limit=280) {
-  const {plan,skip}=this.compute(row);
-  const lines=plan.assignments.map(a=>`${a.name} → ${!a.main?'brak celu':skip.has(a.main)?'rezerwa':a.main}`.slice(0,limit));
+  const {plan,reserve}=this.compute(row);
+  const lines=plan.assignments.map(a=>`${a.name} → ${reserve(a)?'rezerwa':a.main??'brak celu'}`.slice(0,limit));
   const chunks=[];let current='';
   for(const line of lines) {
    if(current&&current.length+1+line.length>limit){chunks.push(current);current='';}
@@ -83,35 +92,48 @@ export class WarReport {
    return `• **${name}**: ${options.length?options.join(' · '):'nawet maksymalny tech nie wystarcza'}`;
   });
   const missing=beaten!=null&&reset!=null&&beaten<reset?` Do resetu (${reset} pokonanych) brakuje **${reset-beaten}**.`:'';
-  return [`📈 **Tech wojenny** (teraz ⚔️ ${dmg}/${max} · ❤️ ${hp}/${max}): ${hint.enemies.length} rywali poza zasięgiem.${missing} Ile poziomów trzeba, żeby ktoś z nas ich pokonał (≥50%):`,...rows];
+  return [`📈 **Tech wojenny** (teraz ⚔️ ${dmg}/${max} · ❤️ ${hp}/${max}). Wzrost potrzebny do osiągnięcia ≥50% przez co najmniej jednego gracza (pokazano ${rows.length} celów):${missing}`,...rows];
  }
  static render(row,userId,page=0,testMode=false) {
   const clean=this.clean;
-  const {p,plan,simulated,tooStrong,skip}=this.compute(row);
+  const {p,plan,simulated,tooStrong,skip,reserve,bestByEnemy}=this.compute(row);
   const allies=new Map(p.ours.map(x=>[x.name,x])),enemies=new Map(p.enemies.map(x=>[x.name,x]));
   const boost=b=>Math.sqrt((1+b.damage/100)*(1+b.health/100));
   const ownBoost=boost(p.own_bonus),enemyBoost=boost(p.enemy_bonus);
-  const percent=x=>`${this.number(x*100,0)}%`;
+  const percent=x=>x>0&&x<.01?'<1%':x>.99&&x<1?'>99%':`${this.number(x*100,0)}%`;
   const odds=(player,name)=>{
    const m=simulated?player.matchups?.find(x=>x.name===name):null;
-   if(m&&!m.error)return {text:percent(m.probability),good:m.probability>.5,source:'sim'};
+   if(m&&!m.error) {
+    const trials=Number.isInteger(m.trials)&&(m.probability===0||m.probability===1)?` · ${m.wins}/${m.trials}`:'';
+    return {text:percent(m.probability)+trials,good:m.probability>.5,source:'sim',probability:m.probability};
+   }
    const ratio=(allies.get(player.name).power*ownBoost)/(enemies.get(name).power*enemyBoost);
    return {text:`moc ${ratio>=1?'+':''}${this.number((ratio-1)*100,0)}%`,good:ratio>=1,source:'power'};
   };
+  const winnable=(assignment,limit,includeMain=false)=> (assignment.matchups??[])
+   .filter(m=>!m.error&&m.probability>0&&!skip.has(m.name)&&(includeMain||m.name!==assignment.main))
+   .sort((x,y)=>y.probability-x.probability||x.name.localeCompare(y.name)).slice(0,limit)
+   .map(m=>`${clean(m.name)} ${percent(m.probability)}`).join(', ');
   const lines=plan.assignments.map(a=>{
-   if(!a.main)return `🔴 **${clean(a.name)}** → brak wolnego przeciwnika`;
-   if(skip.has(a.main)) {
-    const retry=(a.matchups??[]).filter(m=>!m.error&&!skip.has(m.name)&&m.name!==a.main).sort((x,y)=>y.probability-x.probability).slice(0,3)
-     .map(m=>`${clean(m.name)} ${percent(m.probability)}`).join(', ');
-    return `🔁 **${clean(a.name)}** → rezerwa (${clean(a.main)} poza zasięgiem, ${odds(a,a.main).text})${retry?` · dobij: ${retry}`:''}`;
+   if(reserve(a)) {
+    const retry=winnable(a,2,true);
+    return `🔁 **${clean(a.name)}** → rezerwa${retry?` · dobij: ${retry}`:''}`;
    }
+   if(!a.main)return `🔴 **${clean(a.name)}** → brak wolnego przeciwnika`;
    const main=odds(a,a.main);
+   const zero=main.probability===0;
+   const otherTargets=zero?winnable(a,2):'';
    const marker=a.shared?'🟠':main.source==='power'?'⚖️':main.good?'🟢':'🟡';
+   if(zero)return `${marker} **${clean(a.name)}** → **${clean(a.main)}** (${main.text})${otherTargets?` · cele z szansą: ${otherTargets}`:''}`;
    // Alternatives stay short: the name, plus the chance only when a simulation exists (never power).
    const alts=a.alternatives.map(name=>{const o=odds(a,name);return o.source==='sim'?`${clean(name)} ${o.text}`:clean(name);}).join(', ');
    return `${marker} **${clean(a.name)}** → **${clean(a.main)}** (${main.text})${alts?` · alt: ${alts}`:''}`;
   });
   const counts=marker=>lines.filter(x=>x.startsWith(marker)).length;
+  const unique=plan.assignments.filter(a=>a.main&&!a.shared&&!reserve(a));
+  const uniqueFavoured=unique.filter(a=>a.matchups?.some(m=>m.name===a.main&&m.probability>=.5)).length;
+  const zeroAssigned=unique.filter(a=>a.matchups?.some(m=>m.name===a.main&&m.probability===0)).length;
+  const reachable=[...bestByEnemy.values()].filter(e=>e.best>=.5).length;
   const realTech=p.real_tech===true;
   const tech=b=>`+${this.number(b?.damage??0,1)}% obrażeń / +${this.number(b?.health??0,1)}% zdrowia`;
   const legend=[
@@ -120,9 +142,10 @@ export class WarReport {
    `**${clean(p.own_clan??'Nasz klan')}** (${p.ours.length}) vs **${clean(p.enemy_clan??'Rywal')}** (${p.enemies.length})`,
    'Format: **gracz** → **przeciwnik** (szansa wygranej) · alt: zapasowe cele (z szansą, jeśli jest symulacja).',
    `🟢 przewaga w symulacji (${counts('🟢')}) · 🟡 szansa ≤50% (${counts('🟡')}) · ⚖️ dobór wg mocy, brak pełnych danych (${counts('⚖️')})${counts('🟠')?` · 🟠 wspólny cel (${counts('🟠')})`:''}${counts('🔴')?` · 🔴 bez celu (${counts('🔴')})`:''}`,
-   ...(tooStrong.length?[`🔁 Rezerwa (${counts('🔁')}): do resetu listy wystarczy pokonać 45 rywali, więc ${tooStrong.length} poza zasięgiem (${tooStrong.map(e=>clean(e.name)).join(', ')}) pomijamy. Rezerwa dobija rywali, których atak się nie udał.`]:[]),
+   ...(simulated?[`🎯 Unikalne pary z szansą ≥50%: **${uniqueFavoured}/${Math.min(45,p.enemies.length)} do resetu**. Przydziały z 0 wygranych: **${zeroAssigned}**. Rywale, na których co najmniej jeden z nas ma ≥50%: **${reachable}/${p.enemies.length}**.`]:[]),
+   ...(tooStrong.length?[`🔁 Rezerwa (${counts('🔁')}). Pomijamy cele z najlepszą szansą w klanie poniżej 25%: ${tooStrong.map(e=>clean(e.name)).join(', ')}. Rezerwa dobija rywali po nieudanych atakach.`]:[]),
    ...this.techHint(p.simulation?.tech_hint),
-   simulated?`Szanse to wynik modelu walki, nie gwarancja. Profile: ${plan.completeOurs}/${p.ours.length} + ${plan.completeEnemies}/${p.enemies.length}.`:'Brak symulacji — dobór wyłącznie według mocy z bonusami.',
+   simulated?`Procenty to wyniki modelu. Przy skrajnych wynikach podano wygrane / próby. Profile: ${plan.completeOurs}/${p.ours.length} + ${plan.completeEnemies}/${p.enemies.length}.`:'Brak symulacji — dobór wyłącznie według mocy z bonusami.',
   ].join('\n');
   // Pack lines into ≤4000-character embeds and ≤5800 characters per message.
   const title=testMode?(realTech?'🧪 LISTA POGLĄDOWA (tech rywala odczytany)':'🧪 LISTA POGLĄDOWA BEZ TECHU RYWALA'):`⚔️ Lista wojenna · ${clean(row.war_day)}`;
